@@ -1,0 +1,10 @@
+{
+  "manufacturer": "EMRAX",
+  "model": "228 Medium Voltage",
+  "mass_kg": 12.3,
+  "continuous_power_kw": 55.0,
+  "peak_power_kw": 109.0,
+  "peak_efficiency_percent": 96,
+  "power_density_kw_per_kg": 8.86,
+  "notes": "Higher peak power for aggressive climbs. Fixed off-the-shelf component—weight is constant regardless of power draw."
+}

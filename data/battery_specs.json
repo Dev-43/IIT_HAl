@@ -1,0 +1,14 @@
+{
+  "cell_format": "21700 Cylindrical",
+  "chemistry": "Lithium-Ion (NCA)",
+  "energy_density_wh_per_kg": 250,
+  "max_continuous_discharge_c_rate": 3.0,
+  "max_peak_discharge_c_rate": 5.0,
+  "charging_efficiency_percent": 92,
+  "min_soc_limit": 0.10,
+  "max_soc_limit": 0.95,
+  "generator_efficiency": 0.85,
+  "min_capacity_kwh": 16.69,
+  "max_capacity_kwh": 50.0,
+  "notes": "Minimum capacity bound set to 16.69 kWh to satisfy STANAG 4671 30-minute battery-only emergency loiter reserve (27.24 kW propulsion power / 96% motor efficiency / 85% usable SoC range)."
+}

@@ -1,0 +1,14 @@
+{
+  "engine_class": "Lightweight Turboshaft / APU",
+  "dry_weight_kg": 35.0,
+  "max_continuous_power_kw": 60.0,
+  "peak_power_kw": 75.0,
+  "specific_fuel_consumption_kg_per_kwh": 0.38,
+  "fuel_type": "Jet-A1",
+  "fuel_density_kg_per_liter": 0.8,
+  "min_size_kw": 30.0,
+  "max_size_kw": 120.0,
+  "reference_power_kw": 67.5,
+  "reference_weight_kg": 35.0,
+  "notes": "SFC assumes engine operating at >80% load. Apply algorithmic penalty to SFC at partial load (<50%). Weight scales linearly from reference point."
+}
