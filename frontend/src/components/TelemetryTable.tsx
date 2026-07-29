@@ -26,25 +26,9 @@ interface TelemetryTableProps {
   onIndexChange: (index: number) => void;
 }
 
-const PHASE_COLORS: Record<string, string> = {
-  takeoff:   'text-red-400',
-  climb:     'text-amber-400',
-  cruise:    'text-cyan-400',
-  loiter:    'text-violet-400',
-  descent:   'text-teal-400',
-  landing:   'text-emerald-400',
-  completed: 'text-slate-500',
-};
+const PHASE_COLORS: Record<string, string> = new Proxy({}, { get: () => 'text-[#5C6773]' }) as any;
 
-const PHASE_PILL_BG: Record<string, string> = {
-  takeoff:   'bg-red-900/20 border-red-800/30',
-  climb:     'bg-amber-900/20 border-amber-800/30',
-  cruise:    'bg-cyan-900/20 border-cyan-800/30',
-  loiter:    'bg-violet-900/20 border-violet-800/30',
-  descent:   'bg-teal-900/20 border-teal-800/30',
-  landing:   'bg-emerald-900/20 border-emerald-800/30',
-  completed: 'bg-slate-800/20 border-slate-700/30',
-};
+const PHASE_PILL_BG: Record<string, string> = new Proxy({}, { get: () => 'bg-white/5 border-white/10 backdrop-blur-md' }) as any;
 
 function downsampleIndices(total: number, maxRows: number): number[] {
   if (total <= maxRows) return Array.from({ length: total }, (_, i) => i);
@@ -105,7 +89,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className={`flex-shrink-0 grid ${GRID} gap-0 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-[#0D1117] px-1 py-1.5 border-t-2 border-t-emerald-500/60 border-b border-slate-700/60`}>
+      <div className={`flex-shrink-0 grid ${GRID} gap-0 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-transparent px-1 py-1.5 backdrop-blur-md border-t-2 border-t-[#1F2733] border-b border-[#1F2733]`}>
         <span className="text-center">Time</span>
         <span className="text-right">P_aero</span>
         <span className="text-right">P_climb</span>
@@ -118,7 +102,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
         <span className="text-center">Phase</span>
       </div>
       {/* Unit sub-row */}
-      <div className={`flex-shrink-0 grid ${GRID} gap-0 text-[8px] text-slate-600 bg-[#0D1117] px-1 py-0.5 border-b border-slate-800/50`}>
+      <div className={`flex-shrink-0 grid ${GRID} gap-0 text-[8px] text-slate-600 bg-transparent px-1 py-0.5 backdrop-blur-md border-b border-[#1F2733]`}>
         <span className="text-center">–</span>
         <span className="text-right">kW</span>
         <span className="text-right">kW</span>
@@ -144,24 +128,24 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
             <div
               key={idx}
               onClick={() => onIndexChange(idx)}
-              className={`grid ${GRID} gap-0 text-[10px] font-mono px-1 py-[3px] cursor-pointer border-b border-slate-800/30 transition-colors duration-75
-                odd:bg-slate-900/20
+              className={`grid ${GRID} gap-0 text-[10px] font-mono px-1 py-[3px] cursor-pointer border-b border-[#1F2733] transition-colors duration-75
+                odd:bg-white/[0.02]
                 ${isActive
-                  ? 'bg-emerald-950/20 border-l-2 border-l-emerald-500 text-emerald-100'
+                  ? 'bg-transparent border-l-2 border-l-[#FFB454] text-[#E8EDF2]'
                   : 'text-slate-300 hover:bg-slate-800/40 border-l-2 border-l-transparent'
                 }`}
             >
               <span className="text-center text-slate-400">{formatTime(pt.time)}</span>
               <span className="text-right">{pt.p_aero.toFixed(1)}</span>
-              <span className={`text-right ${pt.p_climb > 0.1 ? 'text-amber-300' : pt.p_climb < -0.1 ? 'text-teal-400' : ''}`}>
+              <span className={`text-right ${pt.p_climb > 0.1 ? 'text-[#FFB454]' : pt.p_climb < -0.1 ? 'text-teal-400' : ''}`}>
                 {pt.p_climb.toFixed(1)}
               </span>
               <span className="text-right font-semibold">{pt.power_required.toFixed(1)}</span>
-              <span className={`text-center ${pt.u > 0.4 ? 'text-amber-400' : pt.u > 0.1 ? 'text-cyan-400' : 'text-emerald-400'}`}>
+              <span className={`text-center ${pt.u > 0.4 ? 'text-[#FFB454]' : pt.u > 0.1 ? 'text-[#E8EDF2]' : 'text-[#FFB454]'}`}>
                 {(pt.u * 100).toFixed(0)}%
               </span>
-              <span className="text-right text-amber-300">{pt.power_motor.toFixed(1)}</span>
-              <span className="text-right text-cyan-300">{pt.power_engine.toFixed(1)}</span>
+              <span className="text-right text-[#FFB454]">{pt.power_motor.toFixed(1)}</span>
+              <span className="text-right text-[#E8EDF2]">{pt.power_engine.toFixed(1)}</span>
 
               {/* SoC with inline bar */}
               <span className="text-right relative">
@@ -171,7 +155,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
                     background: `linear-gradient(to right, ${pt.soc < 0.2 ? '#ef4444' : pt.soc > 0.7 ? '#10b981' : '#eab308'} ${socPct}%, transparent ${socPct}%)`,
                   }}
                 />
-                <span className={`relative z-10 ${pt.soc < 0.2 ? 'text-red-400' : pt.soc > 0.7 ? 'text-emerald-400' : 'text-yellow-300'}`}>
+                <span className={`relative z-10 ${pt.soc < 0.2 ? 'text-red-400' : pt.soc > 0.7 ? 'text-[#FFB454]' : 'text-yellow-300'}`}>
                   {socPct.toFixed(0)}%
                 </span>
               </span>

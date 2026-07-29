@@ -55,28 +55,20 @@ function fmtTime(sec: number): string {
 
 const PHASE_BADGE: Record<string, string> = {
   takeoff:   'bg-red-900/60 text-red-300 border-red-700/40',
-  climb:     'bg-amber-900/60 text-amber-300 border-amber-700/40',
-  cruise:    'bg-cyan-900/60 text-cyan-300 border-cyan-700/40',
+  climb:     'bg-amber-900/60 text-[#FFB454] border-amber-700/40',
+  cruise:    'bg-cyan-900/60 text-[#E8EDF2] border-cyan-700/40',
   loiter:    'bg-violet-900/60 text-violet-300 border-violet-700/40',
   descent:   'bg-teal-900/60 text-teal-300 border-teal-700/40',
-  landing:   'bg-emerald-900/60 text-emerald-300 border-emerald-700/40',
-  completed: 'bg-slate-800/60 text-slate-400 border-slate-700/40',
+  landing:   'bg-emerald-900/60 text-[#FFB454] border-[#1F2733]',
+  completed: 'bg-slate-800/60 text-[#5C6773] border-[#1F2733]',
 };
 
-const PHASE_GLOW: Record<string, string> = {
-  takeoff:   'shadow-[0_0_8px_rgba(248,113,113,0.4)]',
-  climb:     'shadow-[0_0_8px_rgba(251,191,36,0.4)]',
-  cruise:    'shadow-[0_0_8px_rgba(34,211,238,0.4)]',
-  loiter:    'shadow-[0_0_8px_rgba(167,139,250,0.4)]',
-  descent:   'shadow-[0_0_8px_rgba(45,212,191,0.4)]',
-  landing:   'shadow-[0_0_8px_rgba(52,211,153,0.4)]',
-  completed: '',
-};
+const PHASE_GLOW: Record<string, string> = new Proxy({}, { get: () => '' }) as any;
 
 // HAL logo SVG (hexagon outline)
 function HalLogo() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="1.5" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFB454" strokeWidth="1.5" strokeLinejoin="round">
       <polygon points="12 2 21.39 7 21.39 17 12 22 2.61 17 2.61 7" />
       <polygon points="12 6 17.5 9 17.5 15 12 18 6.5 15 6.5 9" opacity="0.4"/>
     </svg>
@@ -200,41 +192,41 @@ export default function Dashboard() {
   const totalWeight = useMemo(() => weightBreakdown?.reduce((s, b) => s + b.weight, 0) || 1000, [weightBreakdown]);
 
   return (
-    <div className="h-screen w-screen bg-[#0B0F19] text-slate-200 flex flex-col overflow-hidden select-none">
+    <div className="h-screen w-screen text-[#E8EDF2] flex flex-col relative overflow-hidden select-none">
 
       {/* ── TOP BAR (glassmorphism) ─────────────────────────────────────── */}
       <header
-        className="h-11 flex-shrink-0 flex items-center justify-between px-4 border-b border-slate-700/40"
+        className="h-11 flex-shrink-0 flex items-center justify-between px-4 border-b border-[#1F2733]"
         style={{
-          background: 'linear-gradient(135deg, rgba(13,17,23,0.92) 0%, rgba(15,23,42,0.88) 100%)',
-          backdropFilter: 'blur(12px)',
+          background: 'rgba(10,14,20,0.65)',
+          backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(12px)',
-          boxShadow: 'inset 0 -1px 0 rgba(16,185,129,0.12), 0 1px 0 rgba(0,0,0,0.6)',
+          boxShadow: 'none',
         }}
       >
         <div className="flex items-center gap-3">
           <HalLogo />
-          <span className="text-[11px] font-extrabold tracking-[0.22em] uppercase text-emerald-400 glow-emerald">AeroOptima</span>
-          <span className="hidden sm:block text-[9px] text-slate-500 font-mono border-l border-slate-700 pl-3 ml-1">HAL × IIT Indore | PS-1 Hybrid-Electric UAV</span>
+          <span className="text-[11px] font-extrabold tracking-[0.22em] uppercase text-[#FFB454]">AeroOptima</span>
+          <span className="hidden sm:block text-[9px] text-[#5C6773] font-mono border-l border-slate-700 pl-3 ml-1">HAL × IIT Indore | PS-1 Hybrid-Electric UAV</span>
         </div>
-        <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400">
+        <div className="flex items-center gap-4 text-[10px] font-mono text-[#5C6773]">
           {specs && (
             <>
-              <span>ENDURANCE: <b className="text-emerald-400 glow-emerald font-mono">
+              <span>ENDURANCE: <b className="text-[#FFB454] font-mono">
                 {specs.endurance_hours.toFixed(2)}h
                 {specs.endurance_hours_min !== undefined && specs.endurance_hours_max !== undefined && (
-                  <span className="text-slate-400 text-[9px] font-normal ml-1">
+                  <span className="text-[#5C6773] text-[9px] font-normal ml-1">
                     ({specs.endurance_hours_min.toFixed(1)}-{specs.endurance_hours_max.toFixed(1)}h range)
                   </span>
                 )}
               </b></span>
-              <span>ENGINE: <b className="text-cyan-300">{specs.engine_kw.toFixed(1)}kW</b></span>
-              <span>BATT: <b className="text-amber-300">{specs.battery_kwh.toFixed(1)}kWh</b></span>
-              <span>MOTOR: <b className="text-purple-300">{specs.motor_model}</b></span>
+              <span>ENGINE: <b className="text-[#E8EDF2]">{specs.engine_kw.toFixed(1)}kW</b></span>
+              <span>BATT: <b className="text-[#FFB454]">{specs.battery_kwh.toFixed(1)}kWh</b></span>
+              <span>MOTOR: <b className="text-[#E8EDF2]">{specs.motor_model}</b></span>
               {/* SYS ONLINE badge */}
-              <span className="flex items-center gap-1.5 ml-2 border border-emerald-700/40 rounded-full px-2 py-0.5 bg-emerald-950/40">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.8)]" />
-                <span className="text-[9px] font-bold text-emerald-400 tracking-widest">SYS ONLINE</span>
+              <span className="flex items-center gap-1.5 ml-2 border border-[#1F2733] rounded-full px-2 py-0.5 bg-[#0A0E14]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 " />
+                <span className="text-[9px] font-bold text-[#FFB454] tracking-widest">SYS ONLINE</span>
               </span>
             </>
           )}
@@ -245,48 +237,48 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── PANEL A: Controls (Left Sidebar) ──────────────────────────── */}
-        <aside className="w-[284px] flex-shrink-0 border-r border-slate-800/60 bg-[#0D1117] flex flex-col overflow-y-auto custom-scrollbar">
+        <aside className="w-[284px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
 
           {/* ── Simulation Constraints ─── */}
-          <div className="bg-[#0D1117] border border-slate-800/60 rounded-lg m-2 p-3 panel-enter" style={{ animationDelay: '0ms' }}>
-            <h2 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
+          <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '0ms' }}>
+            <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
               <span>⚡</span> Simulation Constraints
             </h2>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-slate-400">Cruise Speed</span>
-                <span className="font-mono text-emerald-400 font-bold bg-emerald-950/40 px-1.5 rounded">{targetSpeedKmh} km/h</span>
+                <span className="text-[#5C6773]">Cruise Speed</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{targetSpeedKmh} km/h</span>
               </div>
               <input type="range" min="150" max="350" step="5" value={targetSpeedKmh}
                 onChange={(e) => setTargetSpeedKmh(parseInt(e.target.value))} disabled={loading}
-                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-emerald-500 disabled:opacity-40" />
+                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
             </div>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-slate-400">Target Altitude</span>
-                <span className="font-mono text-emerald-400 font-bold bg-emerald-950/40 px-1.5 rounded">{targetAltitude}m</span>
+                <span className="text-[#5C6773]">Target Altitude</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{targetAltitude}m</span>
               </div>
               <input type="range" min="3000" max="10000" step="250" value={targetAltitude}
                 onChange={(e) => setTargetAltitude(parseInt(e.target.value))} disabled={loading}
-                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-emerald-500 disabled:opacity-40" />
+                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
             </div>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-slate-400">Payload Mass</span>
-                <span className="font-mono text-emerald-400 font-bold bg-emerald-950/40 px-1.5 rounded">{payloadWeight} kg</span>
+                <span className="text-[#5C6773]">Payload Mass</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{payloadWeight} kg</span>
               </div>
               <input type="range" min="100" max="300" step="5" value={payloadWeight}
                 onChange={(e) => setPayloadWeight(parseInt(e.target.value))} disabled={loading}
-                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-emerald-500 disabled:opacity-40" />
+                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
             </div>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-slate-400">Initial Fuel Load</span>
-                <span className="font-mono text-orange-400 font-bold bg-orange-950/30 px-1.5 rounded">{Math.round(initialFuelFraction * 100)}%</span>
+                <span className="text-[#5C6773]">Initial Fuel Load</span>
+                <span className="font-mono text-orange-400 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{Math.round(initialFuelFraction * 100)}%</span>
               </div>
               <input type="range" min="0.1" max="1.0" step="0.05" value={initialFuelFraction}
                 onChange={(e) => setInitialFuelFraction(parseFloat(e.target.value))} disabled={loading}
@@ -296,8 +288,8 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 mb-4">
               <input type="checkbox" id="loiterToggle" checked={enableLoiter}
                 onChange={(e) => setEnableLoiter(e.target.checked)} disabled={loading}
-                className="w-3.5 h-3.5 rounded accent-emerald-500 cursor-pointer disabled:opacity-40" />
-              <label htmlFor="loiterToggle" className="text-[10px] text-slate-400 cursor-pointer">Enable Loiter Phase (Orbit)</label>
+                className="w-3.5 h-3.5 rounded accent-[#FFB454] cursor-pointer disabled:opacity-40" />
+              <label htmlFor="loiterToggle" className="text-[10px] text-[#5C6773] cursor-pointer">Enable Loiter Phase (Orbit)</label>
             </div>
 
             {/* Execute button with shimmer */}
@@ -306,9 +298,9 @@ export default function Dashboard() {
                 onClick={handleOptimize}
                 disabled={loading}
                 className="w-full py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] rounded border transition-all overflow-hidden relative
-                  bg-emerald-600/20 border-emerald-600/40 text-emerald-300
-                  hover:bg-emerald-600/30 hover:border-emerald-500/60
-                  hover:shadow-[0_0_20px_rgba(16,185,129,0.35)]
+                  bg-[#12161F] border-[#1F2733] text-[#FFB454]
+                  hover:bg-[#1F2733] hover:border-[#1F2733]
+                  hover:shadow-none
                   disabled:opacity-40 disabled:pointer-events-none
                   flex items-center justify-center gap-2 group"
               >
@@ -330,7 +322,7 @@ export default function Dashboard() {
               {loading && (
                 <div className="mt-1 h-0.5 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-emerald-600 to-cyan-500 rounded-full transition-all duration-500"
+                    className="h-full bg-[#FFB454] rounded-full transition-all duration-500"
                     style={{ width: `${loadProgress}%` }}
                   />
                 </div>
@@ -340,8 +332,8 @@ export default function Dashboard() {
 
           {/* ── Current State ─── */}
           {currentPoint && !loading && (
-            <div className="bg-[#0D1117] border border-slate-800/60 rounded-lg m-2 p-3 panel-enter" style={{ animationDelay: '50ms' }}>
-              <h2 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
+            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '50ms' }}>
+              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>📡</span> Current State — T+{fmtTime(currentPoint.time)}
               </h2>
               <div className={`inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded border mb-3 ${PHASE_BADGE[currentPoint.phase] || PHASE_BADGE.completed} ${PHASE_GLOW[currentPoint.phase] || ''}`}>
@@ -352,14 +344,14 @@ export default function Dashboard() {
                   { label: 'ALT', value: `${currentPoint.altitude.toFixed(0)}m`, cls: '' },
                   { label: 'TAS', value: `${(currentPoint.speed * 3.6).toFixed(0)} km/h`, cls: '' },
                   { label: 'P_REQ', value: `${currentPoint.power_required.toFixed(1)} kW`, cls: '' },
-                  { label: 'ELEC%', value: `${(currentPoint.u * 100).toFixed(0)}%`, cls: currentPoint.u > 0.4 ? 'text-amber-400' : currentPoint.u > 0.05 ? 'text-cyan-400' : 'text-slate-500' },
-                  { label: 'MOTOR', value: `${currentPoint.power_motor.toFixed(1)} kW`, cls: 'text-amber-300' },
-                  { label: 'ENGINE', value: `${currentPoint.power_engine.toFixed(1)} kW`, cls: 'text-cyan-300' },
+                  { label: 'ELEC%', value: `${(currentPoint.u * 100).toFixed(0)}%`, cls: currentPoint.u > 0.4 ? 'text-amber-400' : currentPoint.u > 0.05 ? 'text-cyan-400' : 'text-[#5C6773]' },
+                  { label: 'MOTOR', value: `${currentPoint.power_motor.toFixed(1)} kW`, cls: 'text-[#FFB454]' },
+                  { label: 'ENGINE', value: `${currentPoint.power_engine.toFixed(1)} kW`, cls: 'text-[#E8EDF2]' },
                   { label: 'SOC', value: `${(currentPoint.soc * 100).toFixed(1)}%`, cls: currentPoint.soc < 0.2 ? 'text-red-400' : 'text-yellow-300' },
                   { label: 'FUEL', value: `${currentPoint.fuel.toFixed(1)} kg`, cls: currentPoint.fuel < 30 ? 'text-red-400' : 'text-slate-100' },
                 ].map(({ label, value, cls }) => (
-                  <div key={label} className="bg-slate-900/60 rounded-md p-1.5 border border-slate-800/40">
-                    <span className="text-slate-500 text-[8px] block leading-none mb-0.5">{label}</span>
+                  <div key={label} className="bg-[#12161F] rounded-md p-1.5 border border-[#1F2733]">
+                    <span className="text-[#5C6773] text-[8px] block leading-none mb-0.5">{label}</span>
                     <p className={`font-mono font-bold text-[10px] leading-none ${cls}`}>{value}</p>
                   </div>
                 ))}
@@ -369,8 +361,8 @@ export default function Dashboard() {
 
           {/* ── Mission Profile Timeline ─── */}
           {phaseDurations && !loading && (
-            <div className="bg-[#0D1117] border border-slate-800/60 rounded-lg m-2 p-3 panel-enter" style={{ animationDelay: '100ms' }}>
-              <h2 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
+            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '100ms' }}>
+              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
                 <span>🗺️</span> Mission Profile
               </h2>
               <div className="relative pl-4">
@@ -387,16 +379,16 @@ export default function Dashboard() {
                         {/* Dot + label row */}
                         <div className="flex items-center justify-between mb-1" style={{ animationDelay: `${idx * 40}ms` }}>
                           <div className="flex items-center gap-2">
-                            <span className="absolute left-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-emerald-300 shadow-[0_0_6px_rgba(16,185,129,0.7)]"
+                            <span className="absolute left-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-emerald-300 shadow-[0_0_6px_rgba(255,180,84,0.7)]"
                               style={{ marginTop: 0 }} />
                             <span className="capitalize font-medium text-[10px] text-slate-300">{phase}</span>
                           </div>
-                          <span className="text-slate-400 font-mono text-[10px]">{durMin.toFixed(1)}m</span>
+                          <span className="text-[#5C6773] font-mono text-[10px]">{durMin.toFixed(1)}m</span>
                         </div>
                         {/* Mini progress bar */}
                         <div className="h-1 bg-slate-800/80 rounded-full overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-cyan-500 transition-all"
+                            className="h-full rounded-full bg-[#FFB454] transition-all"
                             style={{ width: `${fraction * 100}%` }}
                           />
                         </div>
@@ -409,11 +401,11 @@ export default function Dashboard() {
 
           {/* ── Weight Budget ─── */}
           {weightBreakdown && !loading && (
-            <div className="bg-[#0D1117] border border-slate-800/60 rounded-lg m-2 p-3 panel-enter" style={{ animationDelay: '150ms' }}>
-              <h2 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
+            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '150ms' }}>
+              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>⚖️</span> MTOW Budget — {specs?.total_weight_kg} kg
               </h2>
-              <div className="h-4 w-full flex rounded-full overflow-hidden mb-2.5 shimmer-bar">
+              <div className="h-4 w-full flex rounded-full overflow-hidden mb-2.5 ">
                 {weightBreakdown.map((bar, i) => (
                   <div
                     key={i}
@@ -426,9 +418,9 @@ export default function Dashboard() {
                 <div key={i} className="flex justify-between text-[10px] py-0.5">
                   <span className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: bar.color }} />
-                    <span className="text-slate-400">{bar.name}</span>
+                    <span className="text-[#5C6773]">{bar.name}</span>
                   </span>
-                  <span className="font-mono text-slate-200">{bar.weight.toFixed(1)} kg</span>
+                  <span className="font-mono text-[#E8EDF2]">{bar.weight.toFixed(1)} kg</span>
                 </div>
               ))}
             </div>
@@ -436,16 +428,16 @@ export default function Dashboard() {
 
           {/* ── System Constants ─── */}
           {specs && !loading && (
-            <div className="bg-[#0D1117] border border-slate-800/60 rounded-lg m-2 p-3 panel-enter" style={{ animationDelay: '200ms' }}>
-              <h2 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
+            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '200ms' }}>
+              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>🔬</span> System Constants
               </h2>
               <div className="space-y-1 text-[10px]">
-                <div className="flex justify-between"><span className="text-slate-500">Drag Polar</span><span className="font-mono text-slate-300">Oswald AR=16.07</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">SFC</span><span className="font-mono text-slate-300">{currentPoint && currentPoint.sfc !== undefined ? `${currentPoint.sfc.toFixed(3)} kg/kWh` : '0.380 kg/kWh'}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">C-Rate Limit</span><span className="font-mono text-yellow-400">3C/5C</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Motor η</span><span className="font-mono text-slate-300">96%</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Strategy</span><span className="font-mono text-emerald-400">Zhang et al.</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Drag Polar</span><span className="font-mono text-slate-300">Oswald AR=16.07</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">SFC</span><span className="font-mono text-slate-300">{currentPoint && currentPoint.sfc !== undefined ? `${currentPoint.sfc.toFixed(3)} kg/kWh` : '0.380 kg/kWh'}</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">C-Rate Limit</span><span className="font-mono text-yellow-400">3C/5C</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Motor η</span><span className="font-mono text-slate-300">96%</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Strategy</span><span className="font-mono text-[#FFB454]">Zhang et al.</span></div>
               </div>
             </div>
           )}
@@ -463,7 +455,7 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col overflow-hidden">
 
           {/* Tab Bar */}
-          <div className="h-9 flex-shrink-0 flex items-end border-b border-slate-800/60 bg-[#0D1117] px-2 gap-1">
+          <div className="h-9 flex-shrink-0 flex items-end border-b border-[#1F2733] bg-transparent px-2 gap-1">
             {/* Animated underline tabs */}
             {(['3d', 'charts'] as const).map((tab) => (
               <button
@@ -471,8 +463,8 @@ export default function Dashboard() {
                 onClick={() => setActiveTab(tab)}
                 className={`px-3 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-wider transition-all relative border-b-2 ${
                   activeTab === tab
-                    ? 'border-b-emerald-500 text-emerald-400'
-                    : 'border-b-transparent text-slate-500 hover:text-slate-300'
+                    ? 'border-b-[#FFB454] text-[#FFB454]'
+                    : 'border-b-transparent text-[#5C6773] hover:text-slate-300'
                 }`}
               >
                 {tab === '3d' ? '3D Flight Profile' : 'Telemetry Charts'}
@@ -480,13 +472,13 @@ export default function Dashboard() {
             ))}
             <button
               onClick={() => setShowMatrix(!showMatrix)}
-              className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors ml-2 mb-1.5"
+              className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border border-slate-800 text-[#5C6773] hover:text-[#E8EDF2] hover:bg-slate-800/40 transition-colors ml-2 mb-1.5"
             >
               {showMatrix ? 'Collapse Matrix' : 'Expand Matrix'}
             </button>
             <div className="flex-1" />
             {currentPoint && (
-              <span className="text-[10px] font-mono text-slate-500 mb-1.5">
+              <span className="text-[10px] font-mono text-[#5C6773] mb-1.5">
                 T+{fmtTime(currentPoint.time)} | {currentPoint.altitude.toFixed(0)}m ALT | {currentPoint.phase.toUpperCase()}
               </span>
             )}
@@ -497,7 +489,7 @@ export default function Dashboard() {
             <div className="flex-1 flex flex-col overflow-hidden">
               {loading ? (
                 /* ── Tactical loading screen ──────────────────────────── */
-                <div className="flex-1 flex flex-col items-center justify-center bg-[#0B0F19] gap-4">
+                <div className="flex-1 flex flex-col items-center justify-center bg-[#0A0E14] gap-4">
                   {/* Spinning ring */}
                   <div className="relative w-20 h-20">
                     <div className="absolute inset-0 rounded-full border-4 border-slate-800" />
@@ -506,14 +498,14 @@ export default function Dashboard() {
                   </div>
                   <div className="text-center">
                     <p className="font-extrabold text-base text-slate-100 tracking-[0.3em] uppercase">Genetic Algorithm Executing</p>
-                    <p className="text-[11px] font-mono text-emerald-400 mt-1 tracking-widest">
+                    <p className="text-[11px] font-mono text-[#FFB454] mt-1 tracking-widest">
                       GEN {String(genCount).padStart(2, '0')} / 15
                     </p>
-                    <p className="text-[10px] text-slate-500 mt-1 font-mono">Sizing propulsion architecture | 40 pop × 15 gen</p>
+                    <p className="text-[10px] text-[#5C6773] mt-1 font-mono">Sizing propulsion architecture | 40 pop × 15 gen</p>
                   </div>
                   <div className="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-emerald-600 to-cyan-400 rounded-full transition-all duration-500"
+                      className="h-full bg-[#FFB454] rounded-full transition-all duration-500"
                       style={{ width: `${loadProgress}%` }}
                     />
                   </div>
@@ -540,11 +532,11 @@ export default function Dashboard() {
                   </div>
 
                   {/* ── Scrubber bar ─── */}
-                  <div className="h-12 flex-shrink-0 flex items-center gap-3 px-4 border-t border-slate-800/60 bg-[#0D1117]">
+                  <div className="h-12 flex-shrink-0 flex items-center gap-3 px-4 border-t border-[#1F2733] bg-[#12161F]">
                     <button
                       onClick={() => setIsPlaying(!isPlaying)}
                       className="w-8 h-8 flex items-center justify-center text-sm border border-slate-700 rounded-full text-slate-300
-                        hover:bg-emerald-900/30 hover:border-emerald-600/60 hover:shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all"
+                        hover:bg-[#1F2733] hover:shadow-none transition-all"
                     >
                       {isPlaying ? '⏸' : '▶'}
                     </button>
@@ -566,7 +558,7 @@ export default function Dashboard() {
                         }}
                       />
                     </div>
-                    <span className="text-[10px] font-mono text-slate-400 w-20 text-right">
+                    <span className="text-[10px] font-mono text-[#5C6773] w-20 text-right">
                       {telemetry.length > 0 ? `${currentIndex + 1}/${telemetry.length}` : '0/0'}
                     </span>
                   </div>
@@ -579,9 +571,9 @@ export default function Dashboard() {
             </div>
 
             {showMatrix && (
-              <div className="w-[620px] flex-shrink-0 border-l border-slate-800/60 bg-[#0D1117] flex flex-col overflow-hidden">
-                <div className="h-7 flex-shrink-0 flex items-center px-2 border-b border-slate-800/40">
-                  <h3 className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">Propulsion Status Matrix — kW</h3>
+              <div className="w-[620px] flex-shrink-0 border-l border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-hidden">
+                <div className="h-7 flex-shrink-0 flex items-center px-2 border-b border-[#1F2733]">
+                  <h3 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em]">Propulsion Status Matrix — kW</h3>
                 </div>
                 <TelemetryTable
                   telemetry={telemetry}
