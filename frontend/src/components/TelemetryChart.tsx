@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 const Plot = dynamic(() => import('react-plotly.js'), {
   ssr: false,
   loading: () => (
-    <div className="h-[500px] w-full flex flex-col items-center justify-center bg-[#060B16] border border-slate-800 rounded-xl text-slate-400">
+    <div className="h-[500px] w-full flex flex-col items-center justify-center bg-transparent border border-white/10 rounded-xl text-slate-400">
       <div className="w-12 h-12 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
       <p className="font-medium animate-pulse">Initializing Visualization Engine...</p>
     </div>
@@ -51,7 +51,7 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
 
   if (!telemetry || telemetry.length === 0) {
     return (
-      <div className="h-[500px] w-full flex items-center justify-center bg-[#060B16] border border-slate-800 rounded-xl text-slate-500 text-sm">
+      <div className="h-[500px] w-full flex items-center justify-center bg-transparent border border-white/10 rounded-xl text-slate-500 text-sm">
         No simulation data available. Trigger optimization to display charts.
       </div>
     );
@@ -98,8 +98,8 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
   }
 
   const commonLayout = {
-    paper_bgcolor: '#060B16',
-    plot_bgcolor: '#060B16',
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
     font: {
       family: 'system-ui, sans-serif',
       color: '#94a3b8',
@@ -159,8 +159,8 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
                 type: 'scatter',
                 mode: 'lines',
                 fill: 'tonexty',
-                fillcolor: 'rgba(16, 185, 129, 0.18)',
-                line: { color: '#10b981', width: 2 },
+                fillcolor: 'rgba(255, 180, 84, 0.1)',
+                line: { color: '#FFB454', width: 2 },
                 hovertemplate: '%{text} kW<extra></extra>',
               },
               {
@@ -198,7 +198,7 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
                 name: 'Battery State of Charge (%)',
                 type: 'scatter',
                 mode: 'lines',
-                line: { color: '#eab308', width: 2.5 },
+                line: { color: '#FFB454', width: 2.5 },
               },
               {
                 x: timeMinutes,
@@ -214,8 +214,8 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
               ...commonLayout,
               yaxis: {
                 ...commonLayout.yaxis,
-                title: { text: 'Battery SoC (%)', font: { size: 12, color: '#eab308' } },
-                tickfont: { color: '#eab308' },
+                title: { text: 'Battery SoC (%)', font: { size: 12, color: '#FFB454' } },
+                tickfont: { color: '#FFB454' },
               },
               yaxis2: {
                 title: { text: 'Fuel Remaining (kg)', font: { size: 12, color: '#f97316' } },
@@ -286,11 +286,11 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
 
   return (
     <div
-      className="w-full rounded-xl border border-slate-800/60 overflow-hidden"
+      className="w-full rounded-xl border border-white/10/60 overflow-hidden"
       style={{
-        background: '#060B16',
+        background: 'transparent',
         borderTopWidth: '2px',
-        borderTopColor: 'rgba(16,185,129,0.25)',
+        borderTopColor: '#1F2733',
       }}
     >
       {/* Title row */}
@@ -304,13 +304,13 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
         <div className="mx-6 mb-4 grid grid-cols-4 gap-2">
           {[
             { label: 'Max Altitude', value: `${summaryStats.maxAlt.toFixed(0)} m`, color: 'text-indigo-400' },
-            { label: 'Endurance', value: `${summaryStats.enduranceH.toFixed(2)} h`, color: 'text-emerald-400' },
+            { label: 'Endurance', value: `${summaryStats.enduranceH.toFixed(2)} h`, color: 'text-[#FFB454]' },
             { label: 'Fuel Burned', value: `${summaryStats.fuelBurned.toFixed(1)} kg`, color: 'text-orange-400' },
             { label: 'Peak Power', value: `${summaryStats.maxPower.toFixed(1)} kW`, color: 'text-red-400' },
           ].map(({ label, value, color }) => (
             <div
               key={label}
-              className="bg-slate-900/50 border border-slate-800/50 rounded-lg px-3 py-2"
+              className="bg-white/5 backdrop-blur-md border border-white/10/50 rounded-lg px-3 py-2"
             >
               <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">{label}</p>
               <p className={`text-sm font-bold font-mono ${color}`}>{value}</p>
@@ -320,22 +320,22 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
       )}
 
       {/* ── Tab buttons ──────────────────────────────────────────────── */}
-      <div className="px-6 flex items-center gap-1 border-b border-slate-800/60 mb-0">
-        <div className="flex border border-slate-800/60 rounded-lg p-0.5 bg-slate-900/30">
+      <div className="px-6 flex items-center gap-1 border-b border-white/10/60 mb-0">
+        <div className="flex border border-white/10/60 rounded-lg p-0.5 bg-white/5 backdrop-blur-md">
           {tabs.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
               className={`relative px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 activeTab === key
-                  ? 'text-emerald-400 bg-slate-800 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                  ? 'text-[#FFB454] bg-slate-800 shadow-none'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              style={activeTab === key ? { textShadow: '0 0 8px rgba(16,185,129,0.7)' } : {}}
+              style={activeTab === key ? { textShadow: 'none' } : {}}
             >
               {label}
               {activeTab === key && (
-                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-emerald-500 rounded-full" />
+                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#FFB454] rounded-full" />
               )}
             </button>
           ))}

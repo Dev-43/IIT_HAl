@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0B0F19;
-  --foreground: #E5E7EB;
+  --background: #0A0E14;
+  --foreground: #E8EDF2;
 }
 
 @theme inline {
@@ -22,38 +22,12 @@ html, body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: #0B0F19;
-  color: #E5E7EB;
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #0A0E14;
+  color: #E8EDF2;
+  font-family: 'Inter', "Suisse Int'l", 'Segoe UI', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   position: relative;
-}
-
-/* Scanline / grid texture overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9999;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-  background-size: 40px 40px;
-  animation: scan-line 8s linear infinite;
-}
-
-/* Scan-line sweep (thin horizontal bright line) */
-@keyframes scan-line {
-  0%   { background-position: 0 -100vh, 0 0; }
-  100% { background-position: 0 100vh, 0 0; }
-}
-
-/* Shimmer sweep for skeleton loaders */
-@keyframes shimmer {
-  0%   { background-position: -200% center; }
-  100% { background-position:  200% center; }
 }
 
 /* Entry animations */
@@ -67,59 +41,20 @@ body::before {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 /* Panel entry utility */
 .panel-enter {
   animation: slideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Glow text utilities */
-.glow-emerald {
-  text-shadow:
-    0 0 8px rgba(16, 185, 129, 0.9),
-    0 0 20px rgba(16, 185, 129, 0.5),
-    0 0 40px rgba(16, 185, 129, 0.2);
-}
-
-.glow-cyan {
-  text-shadow:
-    0 0 8px rgba(34, 211, 238, 0.9),
-    0 0 20px rgba(34, 211, 238, 0.5),
-    0 0 40px rgba(34, 211, 238, 0.2);
-}
-
-/* Shimmer bar overlay */
-.shimmer-bar {
-  position: relative;
-  overflow: hidden;
-}
-.shimmer-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.15) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 2s linear infinite;
-}
-
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar { width: 5px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: #111827; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4B5563; }
+.custom-scrollbar::-webkit-scrollbar-track { background: #0A0E14; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #1F2733; border-radius: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #5C6773; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0D1117; }
-::-webkit-scrollbar-thumb { background: #1F2937; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #374151; }
+::-webkit-scrollbar-track { background: #0A0E14; }
+::-webkit-scrollbar-thumb { background: #1F2733; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #5C6773; }
 
 /* Range Slider — base */
 input[type="range"] {
@@ -130,45 +65,45 @@ input[type="range"] {
 
 input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
-  background: #1F2937;
+  background: #1F2733;
   border-radius: 2px;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #10B981;
-  margin-top: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px; /* Square/technical look */
+  background: #5C6773;
+  margin-top: -4px;
   cursor: pointer;
-  border: 2px solid #0B0F19;
-  transition: box-shadow 0.2s ease;
+  border: 1px solid #1F2733;
+  transition: background 0.2s ease;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover,
 input[type="range"]:focus::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.25), 0 0 12px rgba(16, 185, 129, 0.6);
+  background: #E8EDF2;
 }
 
 input[type="range"]::-moz-range-track {
   height: 4px;
-  background: #1F2937;
+  background: #1F2733;
   border-radius: 2px;
   border: none;
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #10B981;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: #5C6773;
   cursor: pointer;
-  border: 2px solid #0B0F19;
-  transition: box-shadow 0.2s ease;
+  border: 1px solid #1F2733;
+  transition: background 0.2s ease;
 }
 
 input[type="range"]::-moz-range-thumb:hover {
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.25), 0 0 12px rgba(16, 185, 129, 0.6);
+  background: #E8EDF2;
 }

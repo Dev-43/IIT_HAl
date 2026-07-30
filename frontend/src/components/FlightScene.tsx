@@ -158,7 +158,7 @@ function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
 function generatePathColors(telemetry: TelemetryPoint[]): THREE.Color[] {
   const COLOR_BATTERY = new THREE.Color(0xF59E0B);
   const COLOR_HYBRID  = new THREE.Color(0x06B6D4);
-  const COLOR_ENGINE  = new THREE.Color(0x10B981);
+  const COLOR_ENGINE  = new THREE.Color(0xFFB454);
   const COLOR_IDLE    = new THREE.Color(0x4B5563);
 
   return telemetry.map((pt) => {
@@ -192,7 +192,7 @@ function PhaseMarkers({ telemetry, flightPath }: { telemetry: TelemetryPoint[]; 
 
   const phaseColors: Record<string, string> = {
     takeoff: '#EF4444', climb: '#F59E0B', cruise: '#06B6D4',
-    loiter: '#8B5CF6', descent: '#14B8A6', landing: '#10B981',
+    loiter: '#8B5CF6', descent: '#14B8A6', landing: '#FFB454',
   };
 
   return (
@@ -215,7 +215,7 @@ function PhaseMarkers({ telemetry, flightPath }: { telemetry: TelemetryPoint[]; 
             style={{ pointerEvents: 'none' }}
           >
             <div style={{
-              background: '#0D1117E0',
+              background: '#12161FE0',
               border: `1px solid ${phaseColors[m.phase] || '#374151'}`,
               borderRadius: '3px',
               padding: '2px 6px',
@@ -274,7 +274,7 @@ function UAVMarker({ position, nextPosition, telemetryPt }: {
           style={{ pointerEvents: 'none' }}
         >
           <div style={{
-            background: '#0B0F19D0',
+            background: '#0A0E14D0',
             border: '1px solid #F59E0B50',
             borderRadius: '4px',
             padding: '4px 8px',
@@ -289,7 +289,7 @@ function UAVMarker({ position, nextPosition, telemetryPt }: {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
               <span style={{ color: '#9CA3AF', fontSize: '8px' }}>ALT</span>
-              <span style={{ color: '#10B981', fontWeight: 700 }}>{telemetryPt.altitude.toFixed(0)}m</span>
+              <span style={{ color: '#FFB454', fontWeight: 700 }}>{telemetryPt.altitude.toFixed(0)}m</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
               <span style={{ color: '#9CA3AF', fontSize: '8px' }}>TAS</span>
@@ -297,7 +297,7 @@ function UAVMarker({ position, nextPosition, telemetryPt }: {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
               <span style={{ color: '#9CA3AF', fontSize: '8px' }}>PSR</span>
-              <span style={{ color: telemetryPt.u > 0.3 ? '#F59E0B' : '#10B981', fontWeight: 700 }}>
+              <span style={{ color: telemetryPt.u > 0.3 ? '#F59E0B' : '#FFB454', fontWeight: 700 }}>
                 {(telemetryPt.u * 100).toFixed(0)}%
               </span>
             </div>
@@ -339,10 +339,10 @@ function AxisLabels() {
 
       <mesh position={[0, 20, 0]}>
         <boxGeometry args={[0.3, 0.3, 0.3]} />
-        <meshStandardMaterial color="#10B981" emissive="#10B981" emissiveIntensity={0.4} />
+        <meshStandardMaterial color="#FFB454" emissive="#FFB454" emissiveIntensity={0.4} />
       </mesh>
       <Html position={[0, 23, 0]} center style={{ pointerEvents: 'none' }}>
-        <span style={{ fontSize: '9px', fontFamily: 'monospace', color: '#10B981', fontWeight: 700 }}>
+        <span style={{ fontSize: '9px', fontFamily: 'monospace', color: '#FFB454', fontWeight: 700 }}>
           ALT ↑
         </span>
       </Html>
@@ -551,19 +551,57 @@ function SceneContent({ telemetry, currentIndex }: FlightSceneProps) {
 export default function FlightScene({ telemetry, currentIndex }: FlightSceneProps) {
   if (!telemetry || telemetry.length === 0) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-[#0B0F19] text-slate-500 text-xs font-mono">
+      <div className="w-full h-full flex items-center justify-center bg-[#0A0E14] text-slate-500 text-xs font-mono">
         AWAITING TELEMETRY DATA...
       </div>
     );
   }
 
+  const currentPt = telemetry[Math.min(currentIndex, telemetry.length - 1)];
+  const alt = currentPt?.altitude || 0;
+  
+  // Generate tape tick marks
+  const tickSpacing = 40; // pixels per 100m
+  const centerOffset = (alt % 100) / 100 * tickSpacing;
+  const baseAlt = Math.floor(alt / 100) * 100;
+  
+  const ticks = [];
+  for(let i = 3; i >= -3; i--) {
+    ticks.push(baseAlt + i * 100);
+  }
+
   return (
-    <Canvas
-      gl={{ antialias: true, alpha: false }}
-      style={{ background: '#0B0F19' }}
-      dpr={[1, 1.5]}
-    >
-      <SceneContent telemetry={telemetry} currentIndex={currentIndex} />
-    </Canvas>
+    <div className="relative w-full h-full">
+      <Canvas
+        gl={{ antialias: true, alpha: false }}
+        style={{ background: 'transparent', position: 'absolute', inset: 0 }}
+        dpr={[1, 1.5]}
+      >
+        <SceneContent telemetry={telemetry} currentIndex={currentIndex} />
+      </Canvas>
+      
+      {/* Signature Element: MIL-STD Altitude Tape */}
+      <div className="absolute right-6 top-1/2 -translate-y-1/2 w-16 h-64 border-l-2 border-white/10 bg-black/20 backdrop-blur-md pointer-events-none overflow-hidden font-mono text-[10px] text-[#E8EDF2] flex flex-col items-start select-none shadow-[-8px_0_16px_rgba(10,14,20,0.5)]">
+        {/* The Tape Container */}
+        <div className="absolute w-full h-full" style={{ transform: `translateY(${centerOffset}px)` }}>
+          {ticks.map((val, idx) => (
+            <div key={idx} className="absolute w-full flex items-center gap-1" style={{ top: `calc(50% - ${(3 - idx) * tickSpacing}px)` }}>
+              <div className="w-2 h-px bg-[#5C6773]" />
+              <span className={val === Math.round(alt/100)*100 && (alt%100 < 5 || alt%100 > 95) ? 'text-[#FFB454] font-bold' : 'text-[#5C6773]'}>
+                {val}
+              </span>
+            </div>
+          ))}
+        </div>
+        {/* Center reticle */}
+        <div className="absolute top-1/2 -translate-y-1/2 right-0 left-0 h-7 border border-[#FFB454] bg-white/10 flex items-center justify-between px-1">
+          <div className="w-1.5 h-1.5 bg-[#FFB454]" />
+          <span className="font-bold text-[#FFB454] text-[11px]">{alt.toFixed(0)}</span>
+        </div>
+        {/* Title */}
+        <div className="absolute top-1 right-1 text-[8px] text-[#5C6773] font-bold bg-white/5 px-1 rounded-sm border border-white/10">ALT M</div>
+      </div>
+    </div>
   );
 }
+
