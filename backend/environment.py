@@ -5,7 +5,11 @@ Physics References:
   - Drag polar: CD = CD0 + CL² / (π · AR · e)            [Oswald model]
   - Lift coefficient: CL = 2·m·g·cos(γ) / (ρ·V²·S)
   - Aero power: P_aero = 0.5·ρ·V³·S·CD                   [= Drag × TAS]
-  - Climb power: P_climb = m·g·Vz                          [Vz = V·sin(γ)]
+  - Climb power: P_climb = m·g·Vz                          [Vz = V·sin(γ)]\
+  - Engine Altitude Lapse (P0 fix): Gagg-Ferrar approximation
+      σ = ρ(h)/ρ₀;  P_max_ice(h) = P_max_ice_SL·(σ − (1−σ)/7.55)  [clamped ≥ 0]
+  - Excess-power-limited climb rate (P0 fix):
+      P_excess = P_avail_thrust − P_aero;  Vz_actual = max(0, P_excess / (m·g))
   - Fuel burn: dm_fuel = SFC · P_ice · dt                  [kg]
   - Battery SoC: ΔSoC = (P_batt · dt) / E_max             [kWh / kWh]
   - Power split: PSR = P_elec / P_req;  P_ice = (1-PSR)·P_req
@@ -321,6 +325,22 @@ class UAVHybridEnv(gym.Env):
         return min(p_crate_limit, motor_limit)
 
     # ------------------------------------------------------------------ #
+    #  Engine Power Limit (Altitude-Derated via Gagg-Ferrar)              #
+    # ------------------------------------------------------------------ #
+    def _max_engine_power(self, altitude_m: float, is_peak: bool = False) -> float:
+        """
+        Compute altitude-derated maximum available engine power in kW using the Gagg-Ferrar formula.
+        Ref: sigma = rho(h) / rho_0
+             P_max_ice(h) = P_max_ice_SL * (sigma - (1 - sigma) / 7.55)
+        """
+        rho = self._atmosphere(altitude_m)
+        rho_0 = self.aero["air_density_sea_level_kg_m3"]
+        sigma = rho / rho_0
+        base_power = self.engine_peak_kw if is_peak else self.engine_continuous_kw
+        derated_power = base_power * (sigma - (1.0 - sigma) / 7.55)
+        return max(0.0, derated_power)
+
+    # ------------------------------------------------------------------ #
     #  Telemetry Logging                                                  #
     # ------------------------------------------------------------------ #
     def _log_telemetry(self, psr: float, p_req: float, p_motor: float,
@@ -367,6 +387,8 @@ class UAVHybridEnv(gym.Env):
         self.time_elapsed = 0.0
         self.current_phase = self.PHASE_TAKEOFF
         self.deficit_counter = 0
+        self.power_deficit_flag = False
+        self.climb_prevented = False
         self.flight_log = []
 
         # Initial telemetry log
@@ -402,13 +424,16 @@ class UAVHybridEnv(gym.Env):
 
         # Determine speed and climb rate based on mission phase
         is_peak_phase = False
+        climb_rate_target = 0.0
+        self.power_deficit_flag = False
+
         if self.current_phase == self.PHASE_TAKEOFF:
             self.speed = max(1.15 * v_stall, 25.0)
-            climb_rate = 3.0
+            climb_rate_target = 3.0
             is_peak_phase = True
         elif self.current_phase == self.PHASE_CLIMB:
             self.speed = max(1.3 * v_stall, 35.0)
-            climb_rate = 5.0
+            climb_rate_target = 5.0
             is_peak_phase = True
         elif self.current_phase == self.PHASE_CRUISE:
             self.speed = max(self.target_speed_ms, 1.25 * v_stall)
@@ -431,6 +456,40 @@ class UAVHybridEnv(gym.Env):
             self.speed = 0.0
             climb_rate = 0.0
 
+        # Excess-power-limited climb rate (P0 fix — "Phantom Climb"):
+        # Prevents altitude from increasing when available power is insufficient.
+        # Uses Gagg-Ferrar altitude-derated engine power (see _max_engine_power).
+        if self.current_phase in (self.PHASE_TAKEOFF, self.PHASE_CLIMB):
+            # Compute aerodynamic power required for level flight at current speed/altitude
+            # (Note: we pass 0.0 for climb_rate)
+            _, p_aero_kw, _ = self._compute_power_required(
+                current_weight, self.speed, self.altitude, 0.0, self.current_phase
+            )
+            
+            # Available shaft power
+            p_elec_avail = 0.0 if self.soc <= self.soc_min else self._max_battery_power(is_peak=is_peak_phase)
+            p_engine_avail = 0.0 if self.fuel_remaining <= 0.01 else self._max_engine_power(self.altitude, is_peak=is_peak_phase)
+            p_avail_shaft = p_elec_avail + p_engine_avail
+            
+            # Available thrust power
+            eta_prop = self._prop_efficiency(self.current_phase)
+            p_avail_thrust = p_avail_shaft * eta_prop
+            
+            # Excess thrust power (kW)
+            p_excess_thrust = p_avail_thrust - p_aero_kw
+            
+            # Achievable climb rate (m/s)
+            v_z_actual = max(0.0, p_excess_thrust * 1000.0 / (current_weight * self.g))
+            
+            # Actual climb rate is limited by target climb rate
+            climb_rate = min(climb_rate_target, v_z_actual)
+            
+            # Telemetry/power deficit flag
+            self.power_deficit_flag = (v_z_actual < climb_rate_target)
+            self.climb_prevented = (v_z_actual <= 0.0)
+        else:
+            self.climb_prevented = False
+
         # ---- Compute Power Required ----
         p_req_kw, p_aero_kw, p_climb_kw = self._compute_power_required(
             current_weight, self.speed, self.altitude, climb_rate, self.current_phase
@@ -450,7 +509,7 @@ class UAVHybridEnv(gym.Env):
                 p_motor = min(p_motor_demand, max_motor)
 
             # Engine limit (rating + fuel availability)
-            engine_max = self.engine_peak_kw if is_peak_phase else self.engine_continuous_kw
+            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase)
             if self.fuel_remaining <= 0.01:
                 p_engine = 0.0
             else:
@@ -484,7 +543,7 @@ class UAVHybridEnv(gym.Env):
             # psr < 0.0: Charging case (Motor acts as generator, engine drives both propeller and generator)
             p_motor_demand = psr * p_req_kw
             
-            engine_max = self.engine_peak_kw if is_peak_phase else self.engine_continuous_kw
+            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase)
             max_charge = self._max_battery_power(is_peak=is_peak_phase)
             max_soc = self.battery_specs.get("max_soc_limit", 0.95)
             

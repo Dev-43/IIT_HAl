@@ -286,7 +286,7 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
 
   return (
     <div
-      className="w-full rounded-xl border border-white/10/60 overflow-hidden"
+      className="w-full rounded-xl border border-white/10 overflow-hidden"
       style={{
         background: 'transparent',
         borderTopWidth: '2px',
@@ -310,7 +310,7 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
           ].map(({ label, value, color }) => (
             <div
               key={label}
-              className="bg-white/5 backdrop-blur-md border border-white/10/50 rounded-lg px-3 py-2"
+              className="bg-white/5 backdrop-blur-md border border-white/10 rounded-lg px-3 py-2"
             >
               <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">{label}</p>
               <p className={`text-sm font-bold font-mono ${color}`}>{value}</p>
@@ -320,8 +320,8 @@ export default function TelemetryChart({ telemetry }: TelemetryChartProps) {
       )}
 
       {/* ── Tab buttons ──────────────────────────────────────────────── */}
-      <div className="px-6 flex items-center gap-1 border-b border-white/10/60 mb-0">
-        <div className="flex border border-white/10/60 rounded-lg p-0.5 bg-white/5 backdrop-blur-md">
+      <div className="px-6 flex items-center gap-1 border-b border-white/10 mb-0">
+        <div className="flex border border-white/10 rounded-lg p-0.5 bg-white/5 backdrop-blur-md">
           {tabs.map(({ key, label }) => (
             <button
               key={key}

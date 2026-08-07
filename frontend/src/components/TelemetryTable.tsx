@@ -26,9 +26,13 @@ interface TelemetryTableProps {
   onIndexChange: (index: number) => void;
 }
 
-const PHASE_COLORS: Record<string, string> = new Proxy({}, { get: () => 'text-[#5C6773]' }) as any;
+const PHASE_COLORS = new Proxy({} as Record<string, string>, {
+  get: () => 'text-[#5C6773]'
+});
 
-const PHASE_PILL_BG: Record<string, string> = new Proxy({}, { get: () => 'bg-white/5 border-white/10 backdrop-blur-md' }) as any;
+const PHASE_PILL_BG = new Proxy({} as Record<string, string>, {
+  get: () => 'bg-white/5 border-white/10 backdrop-blur-md'
+});
 
 function downsampleIndices(total: number, maxRows: number): number[] {
   if (total <= maxRows) return Array.from({ length: total }, (_, i) => i);
