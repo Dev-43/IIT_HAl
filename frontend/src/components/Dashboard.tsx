@@ -7,20 +7,41 @@ import TelemetryChart from './TelemetryChart';
 
 const FlightScene = dynamic_import(() => import('./FlightScene'), { ssr: false });
 
+interface LegResult {
+  role: string;
+  required: number;
+  achieved: number;
+  completed: boolean;
+}
+
 interface OptimalSpecs {
   engine_kw: number;
   battery_kwh: number;
   motor_kw: number;
+  motor_count: number;
   endurance_hours: number;
   endurance_hours_min?: number;
   endurance_hours_max?: number;
+  on_station_min_required: number;
+  on_station_min_achieved: number;
+  bonus_reserve_loiter_min: number;
+  leg_results: LegResult[];
+  reserve_fuel_equivalent_min: number;
+  reserve_battery_equivalent_min: number;
+  engine_out_survivable: boolean;
   empty_weight_kg: number;
+  empty_weight_fraction: number;
   fuel_weight_kg: number;
   total_weight_kg: number;
   motor_model: string;
   engine_weight_kg: number;
   motor_weight_kg: number;
   battery_weight_kg: number;
+  battery_chemistry: string;
+  generator_architecture: string;
+  generator_efficiency: number;
+  l_over_d_max: number;
+  power_split_policy?: { cruise: number; loiter: number } | null;
 }
 
 interface TelemetryPoint {
@@ -43,9 +64,28 @@ interface TelemetryPoint {
   sfc: number;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 
-  (typeof window !== 'undefined' 
-    ? `http://${window.location.hostname}:8000` 
+type LegRole = 'cruise' | 'loiter';
+type WindDir = 'headwind' | 'tailwind';
+
+interface MissionLeg {
+  id: string;
+  role: LegRole;
+  altitude_m: number;
+  speed_kmh: number;
+  distance_km: number;   // used when role === 'cruise'
+  duration_min: number;  // used when role === 'loiter'
+  windDir: WindDir;       // UI-only, cruise legs only
+  windMagnitudeKmh: number; // UI-only, cruise legs only
+}
+
+const DEFAULT_LEGS: MissionLeg[] = [
+  { id: 'leg-1', role: 'cruise', altitude_m: 5000, speed_kmh: 250, distance_km: 300, duration_min: 60, windDir: 'headwind', windMagnitudeKmh: 0 },
+  { id: 'leg-2', role: 'loiter', altitude_m: 3000, speed_kmh: 180, distance_km: 300, duration_min: 60, windDir: 'headwind', windMagnitudeKmh: 0 },
+];
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:8000`
     : 'http://localhost:8000');
 
 function fmtTime(sec: number): string {
@@ -54,6 +94,19 @@ function fmtTime(sec: number): string {
   const s = Math.floor(sec % 60);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m ${s}s`;
+}
+
+// Rough client-side stall-speed estimate for the leg-speed advisory — deliberately
+// approximate (assumes a representative 1000kg weight; actual weight depends on
+// whatever engine/battery/motor-count the GA ultimately picks). Not a hard validation,
+// just a heads-up before a full GA run is spent on an input that would stall-terminate.
+function approxStallKmh(altitudeM: number): number {
+  const rho0 = 1.225;
+  const ratio = Math.max(0.05, 1 - 2.25577e-5 * altitudeM);
+  const rho = rho0 * Math.pow(ratio, 4.25588);
+  const S = 14.0, CLmax = 1.5, g = 9.81, weightKg = 1000;
+  const vStallMs = Math.sqrt((2 * weightKg * g) / (rho * S * CLmax));
+  return vStallMs * 3.6;
 }
 
 const PHASE_BADGE: Record<string, string> = {
@@ -81,10 +134,18 @@ function HalLogo() {
 }
 
 export default function Dashboard() {
-  const [targetSpeedKmh, setTargetSpeedKmh] = useState<number>(250);
-  const [targetAltitude, setTargetAltitude] = useState<number>(5000);
+  const [legs, setLegs] = useState<MissionLeg[]>(DEFAULT_LEGS);
+  const legIdCounter = useRef<number>(DEFAULT_LEGS.length);
+
+  const [baseElevationM, setBaseElevationM] = useState<number>(0);
+  const [ambientTempC, setAmbientTempC] = useState<number>(15);
+  const [turbulenceLevel, setTurbulenceLevel] = useState<number>(0);
+  const [silentLoiterMode, setSilentLoiterMode] = useState<boolean>(true);
+  const [batteryChemistry, setBatteryChemistry] = useState<string>('Li-NCA');
+  const [optimizePowerSplit, setOptimizePowerSplit] = useState<boolean>(false);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+
   const [payloadWeight, setPayloadWeight] = useState<number>(200);
-  const [enableLoiter, setEnableLoiter] = useState<boolean>(true);
   const [showMatrix, setShowMatrix] = useState<boolean>(true);
   const [initialFuelFraction, setInitialFuelFraction] = useState<number>(1.0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -130,6 +191,43 @@ export default function Dashboard() {
     };
   }, [loading]);
 
+  const addLeg = useCallback((role: LegRole) => {
+    legIdCounter.current += 1;
+    setLegs(prev => {
+      const lastAltitude = prev.length ? prev[prev.length - 1].altitude_m : 5000;
+      return [...prev, {
+        id: `leg-${legIdCounter.current}`,
+        role,
+        altitude_m: lastAltitude,
+        speed_kmh: role === 'cruise' ? 250 : 180,
+        distance_km: 200,
+        duration_min: 30,
+        windDir: 'headwind' as WindDir,
+        windMagnitudeKmh: 0,
+      }];
+    });
+  }, []);
+
+  const removeLeg = useCallback((id: string) => {
+    setLegs(prev => (prev.length > 1 ? prev.filter(l => l.id !== id) : prev));
+  }, []);
+
+  const updateLeg = useCallback((id: string, patch: Partial<MissionLeg>) => {
+    setLegs(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+
+  const legWarnings = useMemo(() => {
+    return legs
+      .map((leg, idx) => {
+        const minSafeKmh = 1.2 * approxStallKmh(leg.altitude_m);
+        if (leg.speed_kmh < minSafeKmh) {
+          return `Leg ${idx + 1} (${leg.role} @ ${leg.altitude_m}m): ${leg.speed_kmh}km/h is below the ~${minSafeKmh.toFixed(0)}km/h stall-safety margin (rough estimate, not a hard block).`;
+        }
+        return null;
+      })
+      .filter((w): w is string => w !== null);
+  }, [legs]);
+
   const handleOptimize = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -138,20 +236,42 @@ export default function Dashboard() {
     setGenCount(1);
     setLoadProgress(0);
     try {
+      const apiLegs = legs.map(leg => {
+        const payload: Record<string, unknown> = {
+          role: leg.role,
+          altitude_m: leg.altitude_m,
+          speed_kmh: leg.speed_kmh,
+        };
+        if (leg.role === 'cruise') {
+          payload.distance_km = leg.distance_km;
+          payload.headwind_kmh = leg.windDir === 'headwind' ? leg.windMagnitudeKmh : -leg.windMagnitudeKmh;
+        } else {
+          payload.duration_min = leg.duration_min;
+        }
+        return payload;
+      });
+
       const response = await fetch(`${API_URL}/api/optimize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_speed_kmh: targetSpeedKmh,
-          target_altitude: targetAltitude,
+          legs: apiLegs,
+          base_elevation_m: baseElevationM,
           payload_weight: payloadWeight,
-          enable_loiter: enableLoiter,
           initial_fuel_fraction: initialFuelFraction,
+          ambient_temp_c: ambientTempC,
+          turbulence_level: turbulenceLevel,
+          silent_loiter_mode: silentLoiterMode,
+          battery_chemistry: batteryChemistry,
+          optimize_power_split: optimizePowerSplit,
         }),
       });
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Optimization failed.');
+        const detail = Array.isArray(errorData.detail)
+          ? errorData.detail.map((d: { msg?: string }) => d.msg).join('; ')
+          : errorData.detail;
+        throw new Error(detail || 'Optimization failed.');
       }
       const data = await response.json();
       setSpecs(data.optimal_specs);
@@ -164,29 +284,38 @@ export default function Dashboard() {
       setLoading(false);
       setLoadProgress(100);
     }
-  }, [targetSpeedKmh, targetAltitude, payloadWeight, enableLoiter, initialFuelFraction]);
+  }, [legs, baseElevationM, payloadWeight, initialFuelFraction, ambientTempC, turbulenceLevel, silentLoiterMode, batteryChemistry, optimizePowerSplit]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       handleOptimize();
     }, 0);
     return () => clearTimeout(timer);
-  }, [handleOptimize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const phaseDurations = useMemo(() => {
+  // Contiguous same-phase segments (NOT grouped by phase name globally) — a multi-leg
+  // mission can revisit "cruise"/"loiter"/"climb"/"descent" several times, so grouping by
+  // name alone would collapse distinct ingress/egress/extend segments into one misleading
+  // start->end span.
+  const phaseSegments = useMemo(() => {
     if (!telemetry.length) return null;
-    const phases: Record<string, { start: number; end: number }> = {};
+    const segments: { phase: string; start: number; end: number }[] = [];
     for (const pt of telemetry) {
-      if (!phases[pt.phase]) phases[pt.phase] = { start: pt.time, end: pt.time };
-      phases[pt.phase].end = pt.time;
+      const last = segments[segments.length - 1];
+      if (last && last.phase === pt.phase) {
+        last.end = pt.time;
+      } else {
+        segments.push({ phase: pt.phase, start: pt.time, end: pt.time });
+      }
     }
-    return phases;
+    return segments;
   }, [telemetry]);
 
   const totalMissionTime = useMemo(() => {
-    if (!phaseDurations) return 1;
-    return Object.values(phaseDurations).reduce((acc, t) => acc + (t.end - t.start), 0) || 1;
-  }, [phaseDurations]);
+    if (!phaseSegments) return 1;
+    return phaseSegments.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
+  }, [phaseSegments]);
 
   const weightBreakdown = useMemo(() => {
     if (!specs) return null;
@@ -194,13 +323,18 @@ export default function Dashboard() {
       { name: 'Airframe', weight: 350, color: '#4B5563' },
       { name: 'Payload', weight: payloadWeight, color: '#6366F1' },
       { name: 'Turboshaft', weight: specs.engine_weight_kg, color: '#3B82F6' },
-      { name: 'EMRAX Motor', weight: specs.motor_weight_kg, color: '#10B981' },
+      { name: `EMRAX Motor ×${specs.motor_count}`, weight: specs.motor_weight_kg, color: '#10B981' },
       { name: 'Battery', weight: specs.battery_weight_kg, color: '#F59E0B' },
       { name: 'Fuel (Jet-A1)', weight: specs.fuel_weight_kg, color: '#EF4444' },
     ];
   }, [specs, payloadWeight]);
 
   const totalWeight = useMemo(() => weightBreakdown?.reduce((s, b) => s + b.weight, 0) || 1000, [weightBreakdown]);
+
+  const onStationMet = useMemo(() => {
+    if (!specs) return true;
+    return specs.on_station_min_required === 0 || specs.on_station_min_achieved >= specs.on_station_min_required;
+  }, [specs]);
 
   return (
     <div className="h-screen w-screen text-[#E8EDF2] flex flex-col relative overflow-hidden select-none">
@@ -223,7 +357,11 @@ export default function Dashboard() {
         <div className="flex items-center gap-4 text-[10px] font-mono text-[#5C6773]">
           {specs && (
             <>
-              <span>ENDURANCE: <b className="text-[#FFB454] font-mono">
+              <span>ON-STATION: <b className={onStationMet ? 'text-emerald-400' : 'text-red-400'}>
+                {specs.on_station_min_achieved.toFixed(0)}/{specs.on_station_min_required.toFixed(0)}min
+                <span className="ml-1">{onStationMet ? '✓' : '✗'}</span>
+              </b></span>
+              <span>TOTAL: <b className="text-[#FFB454] font-mono">
                 {specs.endurance_hours.toFixed(2)}h
                 {specs.endurance_hours_min !== undefined && specs.endurance_hours_max !== undefined && (
                   <span className="text-[#5C6773] text-[9px] font-normal ml-1">
@@ -233,7 +371,7 @@ export default function Dashboard() {
               </b></span>
               <span>ENGINE: <b className="text-[#E8EDF2]">{specs.engine_kw.toFixed(1)}kW</b></span>
               <span>BATT: <b className="text-[#FFB454]">{specs.battery_kwh.toFixed(1)}kWh</b></span>
-              <span>MOTOR: <b className="text-[#E8EDF2]">{specs.motor_model}</b></span>
+              <span>MOTORS: <b className="text-[#E8EDF2]">{specs.motor_count}× {specs.motor_model}</b></span>
               {/* SYS ONLINE badge */}
               <span className="flex items-center gap-1.5 ml-2 border border-[#1F2733] rounded-full px-2 py-0.5 bg-[#0A0E14]">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 " />
@@ -248,31 +386,154 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── PANEL A: Controls (Left Sidebar) ──────────────────────────── */}
-        <aside className="w-[284px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
+        <aside className="w-[320px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
 
-          {/* ── Simulation Constraints ─── */}
+          {/* ── Mission Profile (input) ─── */}
           <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '0ms' }}>
             <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
-              <span>⚡</span> Simulation Constraints
+              <span>🗺️</span> Mission Profile
+            </h2>
+
+            <div className="space-y-2 mb-2">
+              {legs.map((leg, idx) => (
+                <div key={leg.id} className="bg-[#12161F] border border-[#1F2733] rounded-md p-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <select
+                      value={leg.role}
+                      disabled={loading}
+                      onChange={(e) => updateLeg(leg.id, { role: e.target.value as LegRole })}
+                      className="bg-white/5 border border-white/10 rounded text-[10px] px-1.5 py-0.5 text-[#E8EDF2] disabled:opacity-40"
+                    >
+                      <option value="cruise">Cruise</option>
+                      <option value="loiter">Loiter</option>
+                    </select>
+                    <span className="text-[8px] text-[#5C6773]">Leg {idx + 1}</span>
+                    <button
+                      onClick={() => removeLeg(leg.id)}
+                      disabled={loading || legs.length <= 1}
+                      className="text-[9px] text-red-400 hover:text-red-300 disabled:opacity-30 px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 text-[9px]">
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[#5C6773]">Altitude (m)</span>
+                      <input
+                        type="number" value={leg.altitude_m} step={100} disabled={loading}
+                        onChange={(e) => updateLeg(leg.id, { altitude_m: parseFloat(e.target.value) || 0 })}
+                        className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#FFB454] font-mono disabled:opacity-40"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[#5C6773]">Speed (km/h)</span>
+                      <input
+                        type="number" value={leg.speed_kmh} step={10} disabled={loading}
+                        onChange={(e) => updateLeg(leg.id, { speed_kmh: parseFloat(e.target.value) || 0 })}
+                        className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#FFB454] font-mono disabled:opacity-40"
+                      />
+                    </label>
+                    {leg.role === 'cruise' ? (
+                      <>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[#5C6773]">Distance (km)</span>
+                          <input
+                            type="number" value={leg.distance_km} step={50} disabled={loading}
+                            onChange={(e) => updateLeg(leg.id, { distance_km: parseFloat(e.target.value) || 0 })}
+                            className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#E8EDF2] font-mono disabled:opacity-40"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[#5C6773]">Wind (km/h)</span>
+                          <div className="flex gap-1">
+                            <select
+                              value={leg.windDir} disabled={loading}
+                              onChange={(e) => updateLeg(leg.id, { windDir: e.target.value as WindDir })}
+                              className="flex-1 bg-white/5 border border-white/10 rounded px-1 text-[8px] disabled:opacity-40"
+                            >
+                              <option value="headwind">Head</option>
+                              <option value="tailwind">Tail</option>
+                            </select>
+                            <input
+                              type="number" value={leg.windMagnitudeKmh} step={5} min={0} disabled={loading}
+                              onChange={(e) => updateLeg(leg.id, { windMagnitudeKmh: parseFloat(e.target.value) || 0 })}
+                              className="w-12 bg-white/5 border border-white/10 rounded px-1 font-mono disabled:opacity-40"
+                            />
+                          </div>
+                        </label>
+                      </>
+                    ) : (
+                      <label className="flex flex-col gap-0.5 col-span-2">
+                        <span className="text-[#5C6773]">Duration (min)</span>
+                        <input
+                          type="number" value={leg.duration_min} step={10} disabled={loading}
+                          onChange={(e) => updateLeg(leg.id, { duration_min: parseFloat(e.target.value) || 0 })}
+                          className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-violet-300 font-mono disabled:opacity-40"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-1.5 mb-2">
+              <button
+                onClick={() => addLeg('cruise')} disabled={loading}
+                className="flex-1 text-[9px] py-1 rounded border border-[#1F2733] text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-40"
+              >
+                + Cruise Leg
+              </button>
+              <button
+                onClick={() => addLeg('loiter')} disabled={loading}
+                className="flex-1 text-[9px] py-1 rounded border border-[#1F2733] text-violet-300 hover:bg-violet-900/20 disabled:opacity-40"
+              >
+                + Loiter Leg
+              </button>
+            </div>
+
+            {legWarnings.length > 0 && (
+              <div className="mb-2 bg-amber-950/30 border border-amber-800/40 rounded-md p-2">
+                {legWarnings.map((w, i) => (
+                  <p key={i} className="text-[9px] text-amber-300 leading-snug mb-1 last:mb-0">⚠ {w}</p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Environment & Constraints ─── */}
+          <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '25ms' }}>
+            <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
+              <span>⚡</span> Environment & Constraints
             </h2>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-[#5C6773]">Cruise Speed</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{targetSpeedKmh} km/h</span>
+                <span className="text-[#5C6773]">Base Elevation</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{baseElevationM}m</span>
               </div>
-              <input type="range" min="150" max="350" step="5" value={targetSpeedKmh}
-                onChange={(e) => setTargetSpeedKmh(parseInt(e.target.value))} disabled={loading}
+              <input type="range" min="0" max="5000" step="100" value={baseElevationM}
+                onChange={(e) => setBaseElevationM(parseInt(e.target.value))} disabled={loading}
                 className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
             </div>
 
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="text-[#5C6773]">Target Altitude</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{targetAltitude}m</span>
+                <span className="text-[#5C6773]">Ambient Temp</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{ambientTempC}°C</span>
               </div>
-              <input type="range" min="3000" max="10000" step="250" value={targetAltitude}
-                onChange={(e) => setTargetAltitude(parseInt(e.target.value))} disabled={loading}
+              <input type="range" min="-30" max="45" step="1" value={ambientTempC}
+                onChange={(e) => setAmbientTempC(parseInt(e.target.value))} disabled={loading}
+                className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
+            </div>
+
+            <div className="mb-3">
+              <div className="flex justify-between text-[10px] mb-1">
+                <span className="text-[#5C6773]">Turbulence</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{turbulenceLevel.toFixed(1)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.1" value={turbulenceLevel}
+                onChange={(e) => setTurbulenceLevel(parseFloat(e.target.value))} disabled={loading}
                 className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
             </div>
 
@@ -296,15 +557,44 @@ export default function Dashboard() {
                 className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-orange-500 disabled:opacity-40" />
             </div>
 
-            <div className="flex items-center gap-2 mb-4">
-              <input type="checkbox" id="loiterToggle" checked={enableLoiter}
-                onChange={(e) => setEnableLoiter(e.target.checked)} disabled={loading}
+            <div className="flex items-center gap-2 mb-1">
+              <input type="checkbox" id="silentLoiterToggle" checked={silentLoiterMode}
+                onChange={(e) => setSilentLoiterMode(e.target.checked)} disabled={loading}
                 className="w-3.5 h-3.5 rounded accent-[#FFB454] cursor-pointer disabled:opacity-40" />
-              <label htmlFor="loiterToggle" className="text-[10px] text-[#5C6773] cursor-pointer">Enable Loiter Phase (Orbit)</label>
+              <label htmlFor="silentLoiterToggle" className="text-[10px] text-[#5C6773] cursor-pointer">Silent Loiter Mode (stealth)</label>
             </div>
 
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-[9px] text-[#5C6773] hover:text-[#E8EDF2] mt-2 underline"
+            >
+              {showAdvanced ? '− Hide' : '+ Show'} advanced design variables
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-2 space-y-2 border-t border-[#1F2733] pt-2">
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-[#5C6773]">Battery Chemistry</span>
+                  <select
+                    value={batteryChemistry} disabled={loading}
+                    onChange={(e) => setBatteryChemistry(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded text-[10px] px-1.5 py-1 text-[#E8EDF2] disabled:opacity-40"
+                  >
+                    <option value="Li-NCA">Li-NCA (250 Wh/kg, 3C/5C)</option>
+                    <option value="Li-LFP">Li-LFP (160 Wh/kg, 2.5C/4C, cold-tolerant)</option>
+                  </select>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="optPsrToggle" checked={optimizePowerSplit}
+                    onChange={(e) => setOptimizePowerSplit(e.target.checked)} disabled={loading}
+                    className="w-3.5 h-3.5 rounded accent-[#FFB454] cursor-pointer disabled:opacity-40" />
+                  <label htmlFor="optPsrToggle" className="text-[10px] text-[#5C6773] cursor-pointer">GA-search power-split policy (slower)</label>
+                </div>
+              </div>
+            )}
+
             {/* Execute button with shimmer */}
-            <div className="relative">
+            <div className="relative mt-4">
               <button
                 onClick={handleOptimize}
                 disabled={loading}
@@ -370,29 +660,87 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ── Mission Profile Timeline ─── */}
-          {phaseDurations && !loading && (
+          {/* ── Mission Feasibility (result) ─── */}
+          {specs && !loading && (
+            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '75ms' }}>
+              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
+                <span>🎯</span> Mission Feasibility
+              </h2>
+              <div className={`text-center rounded-md p-2 mb-2 border ${onStationMet ? 'border-emerald-700/40 bg-emerald-950/20' : 'border-red-700/40 bg-red-950/20'}`}>
+                <p className="text-[8px] text-[#5C6773] uppercase tracking-wide">On-Station Requirement</p>
+                <p className={`text-base font-bold font-mono ${onStationMet ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {specs.on_station_min_achieved.toFixed(0)} / {specs.on_station_min_required.toFixed(0)} min
+                </p>
+                <p className={`text-[9px] font-bold ${onStationMet ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {specs.on_station_min_required === 0 ? 'N/A — no loiter leg' : onStationMet ? '✓ REQUIREMENT MET' : '✗ CUT SHORT — see leg detail below'}
+                </p>
+              </div>
+
+              <div className="space-y-1 mb-2">
+                {specs.leg_results.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between text-[9px]">
+                    <span className="capitalize text-[#5C6773]">{r.role} leg {i + 1}</span>
+                    <span className={r.completed ? 'text-emerald-400' : 'text-red-400'}>
+                      {r.achieved.toFixed(0)}/{r.required.toFixed(0)}{r.role === 'cruise' ? 'km' : 'min'} {r.completed ? '✓' : '✗'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5 text-[10px] mb-2">
+                <div className="bg-[#12161F] rounded-md p-1.5 border border-[#1F2733]">
+                  <span className="text-[#5C6773] text-[8px] block">RESERVE FUEL</span>
+                  <p className="font-mono font-bold">{specs.reserve_fuel_equivalent_min.toFixed(0)} min</p>
+                </div>
+                <div className="bg-[#12161F] rounded-md p-1.5 border border-[#1F2733]">
+                  <span className="text-[#5C6773] text-[8px] block">RESERVE BATT</span>
+                  <p className="font-mono font-bold">{specs.reserve_battery_equivalent_min.toFixed(0)} min</p>
+                </div>
+              </div>
+
+              <div className={`flex items-center gap-1.5 text-[9px] px-2 py-1 rounded border ${specs.engine_out_survivable ? 'border-emerald-700/40 text-emerald-400' : 'border-amber-700/40 text-amber-400'}`}>
+                <span>{specs.engine_out_survivable ? '✓' : '⚠'}</span>
+                <span>Engine-out survivable: {specs.engine_out_survivable ? 'Yes' : 'No'} (30min threshold)</span>
+              </div>
+
+              {specs.bonus_reserve_loiter_min > 0 && (
+                <p className="text-[9px] text-[#5C6773] mt-2">
+                  + {specs.bonus_reserve_loiter_min.toFixed(0)} min bonus reserve loiter beyond the required mission (not counted toward the requirement above)
+                </p>
+              )}
+
+              {specs.power_split_policy && (
+                <p className="text-[9px] text-[#5C6773] mt-2">
+                  GA-searched power split — cruise: {(specs.power_split_policy.cruise * 100).toFixed(0)}% electric,
+                  loiter: {(specs.power_split_policy.loiter * 100).toFixed(0)}% electric
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Mission Timeline (result) ─── */}
+          {phaseSegments && !loading && (
             <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '100ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
-                <span>🗺️</span> Mission Profile
+                <span>⏱️</span> Mission Timeline
               </h2>
               <div className="relative pl-4">
                 {/* Vertical timeline line */}
                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-px bg-gradient-to-b from-emerald-500/60 via-slate-700/40 to-transparent" />
-                {Object.entries(phaseDurations)
-                  .filter(([p]) => p !== 'completed')
-                  .map(([phase, t], idx) => {
-                    const durSec = t.end - t.start;
+                {phaseSegments
+                  .filter((s) => s.phase !== 'completed')
+                  .map((seg, idx) => {
+                    const durSec = seg.end - seg.start;
                     const durMin = durSec / 60;
                     const fraction = Math.min(durSec / totalMissionTime, 1);
                     return (
-                      <div key={phase} className="mb-2.5 last:mb-0">
+                      <div key={`${seg.phase}-${idx}`} className="mb-2.5 last:mb-0">
                         {/* Dot + label row */}
                         <div className="flex items-center justify-between mb-1" style={{ animationDelay: `${idx * 40}ms` }}>
                           <div className="flex items-center gap-2">
                             <span className="absolute left-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-emerald-300 shadow-[0_0_6px_rgba(255,180,84,0.7)]"
                               style={{ marginTop: 0 }} />
-                            <span className="capitalize font-medium text-[10px] text-slate-300">{phase}</span>
+                            <span className="capitalize font-medium text-[10px] text-slate-300">{seg.phase}</span>
                           </div>
                           <span className="text-[#5C6773] font-mono text-[10px]">{durMin.toFixed(1)}m</span>
                         </div>
@@ -445,9 +793,13 @@ export default function Dashboard() {
               </h2>
               <div className="space-y-1 text-[10px]">
                 <div className="flex justify-between"><span className="text-[#5C6773]">Drag Polar</span><span className="font-mono text-slate-300">Oswald AR=16.07</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">L/D Max</span><span className="font-mono text-slate-300">{specs.l_over_d_max.toFixed(1)}</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">SFC</span><span className="font-mono text-slate-300">{currentPoint && currentPoint.sfc !== undefined ? `${currentPoint.sfc.toFixed(3)} kg/kWh` : '0.380 kg/kWh'}</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">C-Rate Limit</span><span className="font-mono text-yellow-400">3C/5C</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">Motor η</span><span className="font-mono text-slate-300">96%</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Chemistry</span><span className="font-mono text-slate-300">{specs.battery_chemistry}</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Generator</span><span className="font-mono text-slate-300">{specs.generator_architecture}</span></div>
+                <div className="flex justify-between"><span className="text-[#5C6773]">Empty Wt Fraction</span><span className="font-mono text-slate-300">{(specs.empty_weight_fraction * 100).toFixed(1)}%</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">Strategy</span><span className="font-mono text-[#FFB454]">Zhang et al.</span></div>
               </div>
             </div>
@@ -512,7 +864,7 @@ export default function Dashboard() {
                     <p className="text-[11px] font-mono text-[#FFB454] mt-1 tracking-widest">
                       GEN {String(genCount).padStart(2, '0')} / 15
                     </p>
-                    <p className="text-[10px] text-[#5C6773] mt-1 font-mono">Sizing propulsion architecture | 40 pop × 15 gen</p>
+                    <p className="text-[10px] text-[#5C6773] mt-1 font-mono">Sizing propulsion architecture against your mission profile</p>
                   </div>
                   <div className="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                     <div
