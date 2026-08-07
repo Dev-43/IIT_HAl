@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare module 'react-plotly.js' {
   import * as React from 'react';
   import { PlotlyHTMLElement, Layout, Data, Config } from 'plotly.js';

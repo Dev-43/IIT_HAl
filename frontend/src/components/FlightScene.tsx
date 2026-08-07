@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { Line, OrthographicCamera, Grid, Html, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -312,9 +312,10 @@ function UAVMarker({ position, nextPosition, telemetryPt }: {
 /*  Altitude Reference Line (dashed drop to ground)                    */
 /* ------------------------------------------------------------------ */
 function AltitudeIndicator({ position }: { position: THREE.Vector3 }) {
+  const { x, y, z } = position;
   const points = useMemo(() => {
-    return [position, new THREE.Vector3(position.x, 0, position.z)];
-  }, [position.x, position.y, position.z]);
+    return [new THREE.Vector3(x, y, z), new THREE.Vector3(x, 0, z)];
+  }, [x, y, z]);
 
   return (
     <Line points={points} color="#F59E0B" lineWidth={1} dashed dashSize={0.8} gapSize={0.5} />
@@ -391,11 +392,19 @@ function TacticalBackground({ currentX }: { currentX: number }) {
   const starPositions = useMemo(() => {
     const pts: number[] = [];
     const count = 500;
+    // Simple pure seeded LCG generator to prevent impure React 19 render warnings
+    // and Next.js hydration mismatches.
+    let seed = 42;
+    const lcg = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+
     // Generate static stars scattered along the entire flight corridor once
     for (let i = 0; i < count; i++) {
-      const x = -500 + Math.random() * 8000; // wider corridor
-      const y = 18 + Math.random() * 80;  // lowered: was 30+220, cruise is now at y=15
-      const z = -150 + Math.random() * 300; // lateral scatter
+      const x = -500 + lcg() * 8000; // wider corridor
+      const y = 18 + lcg() * 80;  // lowered: was 30+220, cruise is now at y=15
+      const z = -150 + lcg() * 300; // lateral scatter
       pts.push(x, y, z);
     }
     return new Float32Array(pts);

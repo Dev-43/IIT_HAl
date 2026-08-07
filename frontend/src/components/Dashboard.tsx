@@ -43,7 +43,10 @@ interface TelemetryPoint {
   sfc: number;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 
+  (typeof window !== 'undefined' 
+    ? `http://${window.location.hostname}:8000` 
+    : 'http://localhost:8000');
 
 function fmtTime(sec: number): string {
   const h = Math.floor(sec / 3600);
@@ -63,7 +66,9 @@ const PHASE_BADGE: Record<string, string> = {
   completed: 'bg-slate-800/60 text-[#5C6773] border-[#1F2733]',
 };
 
-const PHASE_GLOW: Record<string, string> = new Proxy({}, { get: () => '' }) as any;
+const PHASE_GLOW = new Proxy({} as Record<string, string>, {
+  get: () => ''
+});
 
 // HAL logo SVG (hexagon outline)
 function HalLogo() {
@@ -91,7 +96,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'3d' | 'charts'>('3d');
   // Cosmetic generation counter for loading screen
   const [genCount, setGenCount] = useState<number>(1);
-  const [loadProgress, setLoadProgress] = useState<number>(0);
+  const [loadProgress, setLoadProgress] = useState<number>(100);
   const genTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentPoint = useMemo(() => {
@@ -113,15 +118,12 @@ export default function Dashboard() {
   // Drive cosmetic generation counter while loading
   useEffect(() => {
     if (loading) {
-      setGenCount(1);
-      setLoadProgress(0);
       genTimerRef.current = setInterval(() => {
         setGenCount(prev => (prev < 15 ? prev + 1 : 15));
         setLoadProgress(prev => Math.min(prev + 6.5, 98));
       }, 500);
     } else {
       if (genTimerRef.current) clearInterval(genTimerRef.current);
-      setLoadProgress(100);
     }
     return () => {
       if (genTimerRef.current) clearInterval(genTimerRef.current);
@@ -133,6 +135,8 @@ export default function Dashboard() {
     setError(null);
     setCurrentIndex(0);
     setIsPlaying(false);
+    setGenCount(1);
+    setLoadProgress(0);
     try {
       const response = await fetch(`${API_URL}/api/optimize`, {
         method: 'POST',
@@ -152,15 +156,22 @@ export default function Dashboard() {
       const data = await response.json();
       setSpecs(data.optimal_specs);
       setTelemetry(data.telemetry);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Backend connection failed.');
+      const errMsg = err instanceof Error ? err.message : 'Backend connection failed.';
+      setError(errMsg);
     } finally {
       setLoading(false);
+      setLoadProgress(100);
     }
   }, [targetSpeedKmh, targetAltitude, payloadWeight, enableLoiter, initialFuelFraction]);
 
-  useEffect(() => { handleOptimize(); }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handleOptimize();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [handleOptimize]);
 
   const phaseDurations = useMemo(() => {
     if (!telemetry.length) return null;
