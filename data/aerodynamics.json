@@ -13,5 +13,6 @@
   "target_cruise_speed_kmh": 250,
   "target_cruise_altitude_m": 5000,
   "air_density_sea_level_kg_m3": 1.225,
-  "gravity_m_s2": 9.81
+  "gravity_m_s2": 9.81,
+  "propeller_diameter_m": 1.8
 }
