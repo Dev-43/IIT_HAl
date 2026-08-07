@@ -382,10 +382,10 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── PANEL A: Controls (Left Sidebar) ──────────────────────────── */}
-        <aside className="w-[284px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
+        <aside className="w-[284px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14] flex flex-col overflow-y-auto custom-scrollbar">
 
           {/* ── Simulation Constraints ─── */}
-          <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '0ms' }}>
+          <div className="bg-[#12161F] border border-[#1F2733] rounded-lg shadow-md m-3 p-5 panel-enter" style={{ animationDelay: '0ms' }}>
             <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
               <span>⚡</span> Simulation Constraints
             </h2>
@@ -414,7 +414,7 @@ export default function Dashboard() {
                 <div className="mb-3">
                   <div className="flex justify-between text-[10px] mb-1">
                     <span className="text-[#5C6773]">Altitude</span>
-                    <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.altitude_m}m</span>
+                    <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{leg.altitude_m}m</span>
                   </div>
                   <input type="range" min={baseElevationM + 300} max="10000" step="100" value={leg.altitude_m}
                     onChange={(e) => updateLeg(leg.id, { altitude_m: parseInt(e.target.value) })} disabled={loading}
@@ -424,7 +424,7 @@ export default function Dashboard() {
                 <div className="mb-3">
                   <div className="flex justify-between text-[10px] mb-1">
                     <span className="text-[#5C6773]">Speed</span>
-                    <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.speed_kmh} km/h</span>
+                    <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{leg.speed_kmh} km/h</span>
                   </div>
                   <input type="range" min="100" max="350" step="5" value={leg.speed_kmh}
                     onChange={(e) => updateLeg(leg.id, { speed_kmh: parseInt(e.target.value) })} disabled={loading}
@@ -436,33 +436,33 @@ export default function Dashboard() {
                     <div className="mb-3">
                       <div className="flex justify-between text-[10px] mb-1">
                         <span className="text-[#5C6773]">Distance</span>
-                        <span className="font-mono text-cyan-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.distance_km} km</span>
+                        <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded">{leg.distance_km} km</span>
                       </div>
                       <input type="range" min="50" max="1000" step="25" value={leg.distance_km}
                         onChange={(e) => updateLeg(leg.id, { distance_km: parseInt(e.target.value) })} disabled={loading}
-                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-cyan-400 disabled:opacity-40" />
+                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
                     </div>
                     <div className="mb-1">
                       <div className="flex justify-between text-[10px] mb-1">
                         <span className="text-[#5C6773]">Wind</span>
-                        <span className="font-mono text-orange-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">
+                        <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded">
                           {leg.windKmh === 0 ? 'Calm' : `${Math.abs(leg.windKmh)} km/h ${leg.windKmh > 0 ? 'Headwind' : 'Tailwind'}`}
                         </span>
                       </div>
                       <input type="range" min="-60" max="60" step="5" value={leg.windKmh}
                         onChange={(e) => updateLeg(leg.id, { windKmh: parseInt(e.target.value) })} disabled={loading}
-                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-orange-400 disabled:opacity-40" />
+                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
                     </div>
                   </>
                 ) : (
                   <div className="mb-1">
                     <div className="flex justify-between text-[10px] mb-1">
                       <span className="text-[#5C6773]">Duration</span>
-                      <span className="font-mono text-violet-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.duration_min} min</span>
+                      <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded">{leg.duration_min} min</span>
                     </div>
                     <input type="range" min="10" max="300" step="10" value={leg.duration_min}
                       onChange={(e) => updateLeg(leg.id, { duration_min: parseInt(e.target.value) })} disabled={loading}
-                      className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-violet-400 disabled:opacity-40" />
+                      className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
                   </div>
                 )}
               </div>
@@ -494,7 +494,7 @@ export default function Dashboard() {
             <div className="mb-3 pt-3 border-t border-[#1F2733]">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Base Elevation</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{baseElevationM}m</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{baseElevationM}m</span>
               </div>
               <input type="range" min="0" max="5000" step="100" value={baseElevationM}
                 onChange={(e) => setBaseElevationM(parseInt(e.target.value))} disabled={loading}
@@ -504,7 +504,7 @@ export default function Dashboard() {
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Ambient Temp</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{ambientTempC}°C</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{ambientTempC}°C</span>
               </div>
               <input type="range" min="-30" max="45" step="1" value={ambientTempC}
                 onChange={(e) => setAmbientTempC(parseInt(e.target.value))} disabled={loading}
@@ -514,7 +514,7 @@ export default function Dashboard() {
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Turbulence</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{turbulenceLevel.toFixed(1)}</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{turbulenceLevel.toFixed(1)}</span>
               </div>
               <input type="range" min="0" max="1" step="0.1" value={turbulenceLevel}
                 onChange={(e) => setTurbulenceLevel(parseFloat(e.target.value))} disabled={loading}
@@ -524,7 +524,7 @@ export default function Dashboard() {
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Payload Mass</span>
-                <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{payloadWeight} kg</span>
+                <span className="font-mono text-[#FFB454] font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{payloadWeight} kg</span>
               </div>
               <input type="range" min="100" max="300" step="5" value={payloadWeight}
                 onChange={(e) => setPayloadWeight(parseInt(e.target.value))} disabled={loading}
@@ -534,7 +534,7 @@ export default function Dashboard() {
             <div className="mb-3">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Initial Fuel Load</span>
-                <span className="font-mono text-orange-400 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{Math.round(initialFuelFraction * 100)}%</span>
+                <span className="font-mono text-orange-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{Math.round(initialFuelFraction * 100)}%</span>
               </div>
               <input type="range" min="0.1" max="1.0" step="0.05" value={initialFuelFraction}
                 onChange={(e) => setInitialFuelFraction(parseFloat(e.target.value))} disabled={loading}
@@ -617,7 +617,7 @@ export default function Dashboard() {
 
           {/* ── Current State ─── */}
           {currentPoint && !loading && (
-            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '50ms' }}>
+            <div className="bg-[#12161F] border border-[#1F2733] rounded-lg shadow-md m-3 p-5 panel-enter" style={{ animationDelay: '50ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>📡</span> Current State — T+{fmtTime(currentPoint.time)}
               </h2>
@@ -646,7 +646,7 @@ export default function Dashboard() {
 
           {/* ── Mission Profile ─── */}
           {phaseSegments && specs && !loading && (
-            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '100ms' }}>
+            <div className="bg-[#12161F] border border-[#1F2733] rounded-lg shadow-md m-3 p-5 panel-enter" style={{ animationDelay: '100ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
                 <span>🗺️</span> Mission Profile
               </h2>
@@ -701,7 +701,7 @@ export default function Dashboard() {
 
           {/* ── Weight Budget ─── */}
           {weightBreakdown && !loading && (
-            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '150ms' }}>
+            <div className="bg-[#12161F] border border-[#1F2733] rounded-lg shadow-md m-3 p-5 panel-enter" style={{ animationDelay: '150ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>⚖️</span> MTOW Budget — {specs?.total_weight_kg} kg
               </h2>
@@ -728,7 +728,7 @@ export default function Dashboard() {
 
           {/* ── System Constants ─── */}
           {specs && !loading && (
-            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '200ms' }}>
+            <div className="bg-[#12161F] border border-[#1F2733] rounded-lg shadow-md m-3 p-5 panel-enter" style={{ animationDelay: '200ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>🔬</span> System Constants
               </h2>
@@ -873,9 +873,16 @@ export default function Dashboard() {
             </div>
 
             {showMatrix && (
-              <div className="w-[620px] flex-shrink-0 border-l border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-hidden">
-                <div className="h-7 flex-shrink-0 flex items-center px-2 border-b border-[#1F2733]">
-                  <h3 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em]">Propulsion Status Matrix — kW</h3>
+              <div
+                className="w-[620px] flex-shrink-0 border-l border-white/10 flex flex-col overflow-hidden shadow-[inset_1px_0_0_rgba(255,255,255,0.04)]"
+                style={{
+                  background: 'rgba(10,14,20,0.78)',
+                  backdropFilter: 'blur(28px)',
+                  WebkitBackdropFilter: 'blur(28px)',
+                }}
+              >
+                <div className="h-7 flex-shrink-0 flex items-center px-2 border-b border-[#1F2733] bg-white/5">
+                  <h3 className="text-[9px] font-bold text-[#E8EDF2] uppercase tracking-[0.15em]">Propulsion Status Matrix — kW</h3>
                 </div>
                 <TelemetryTable
                   telemetry={telemetry}
