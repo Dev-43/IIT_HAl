@@ -65,7 +65,6 @@ interface TelemetryPoint {
 }
 
 type LegRole = 'cruise' | 'loiter';
-type WindDir = 'headwind' | 'tailwind';
 
 interface MissionLeg {
   id: string;
@@ -74,13 +73,12 @@ interface MissionLeg {
   speed_kmh: number;
   distance_km: number;   // used when role === 'cruise'
   duration_min: number;  // used when role === 'loiter'
-  windDir: WindDir;       // UI-only, cruise legs only
-  windMagnitudeKmh: number; // UI-only, cruise legs only
+  windKmh: number;       // signed: positive=headwind, negative=tailwind (cruise legs only)
 }
 
 const DEFAULT_LEGS: MissionLeg[] = [
-  { id: 'leg-1', role: 'cruise', altitude_m: 5000, speed_kmh: 250, distance_km: 300, duration_min: 60, windDir: 'headwind', windMagnitudeKmh: 0 },
-  { id: 'leg-2', role: 'loiter', altitude_m: 3000, speed_kmh: 180, distance_km: 300, duration_min: 60, windDir: 'headwind', windMagnitudeKmh: 0 },
+  { id: 'leg-1', role: 'cruise', altitude_m: 5000, speed_kmh: 250, distance_km: 300, duration_min: 60, windKmh: 0 },
+  { id: 'leg-2', role: 'loiter', altitude_m: 3000, speed_kmh: 180, distance_km: 300, duration_min: 60, windKmh: 0 },
 ];
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
@@ -202,8 +200,7 @@ export default function Dashboard() {
         speed_kmh: role === 'cruise' ? 250 : 180,
         distance_km: 200,
         duration_min: 30,
-        windDir: 'headwind' as WindDir,
-        windMagnitudeKmh: 0,
+        windKmh: 0,
       }];
     });
   }, []);
@@ -221,7 +218,7 @@ export default function Dashboard() {
       .map((leg, idx) => {
         const minSafeKmh = 1.2 * approxStallKmh(leg.altitude_m);
         if (leg.speed_kmh < minSafeKmh) {
-          return `Leg ${idx + 1} (${leg.role} @ ${leg.altitude_m}m): ${leg.speed_kmh}km/h is below the ~${minSafeKmh.toFixed(0)}km/h stall-safety margin (rough estimate, not a hard block).`;
+          return `Leg ${idx + 1} (${leg.role}): ${leg.speed_kmh}km/h is below the ~${minSafeKmh.toFixed(0)}km/h stall-safety margin at ${leg.altitude_m}m (rough estimate).`;
         }
         return null;
       })
@@ -244,7 +241,7 @@ export default function Dashboard() {
         };
         if (leg.role === 'cruise') {
           payload.distance_km = leg.distance_km;
-          payload.headwind_kmh = leg.windDir === 'headwind' ? leg.windMagnitudeKmh : -leg.windMagnitudeKmh;
+          payload.headwind_kmh = leg.windKmh;
         } else {
           payload.duration_min = leg.duration_min;
         }
@@ -357,11 +354,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-4 text-[10px] font-mono text-[#5C6773]">
           {specs && (
             <>
-              <span>ON-STATION: <b className={onStationMet ? 'text-emerald-400' : 'text-red-400'}>
-                {specs.on_station_min_achieved.toFixed(0)}/{specs.on_station_min_required.toFixed(0)}min
-                <span className="ml-1">{onStationMet ? '✓' : '✗'}</span>
-              </b></span>
-              <span>TOTAL: <b className="text-[#FFB454] font-mono">
+              <span>ENDURANCE: <b className="text-[#FFB454] font-mono">
                 {specs.endurance_hours.toFixed(2)}h
                 {specs.endurance_hours_min !== undefined && specs.endurance_hours_max !== undefined && (
                   <span className="text-[#5C6773] text-[9px] font-normal ml-1">
@@ -369,9 +362,12 @@ export default function Dashboard() {
                   </span>
                 )}
               </b></span>
+              <span>ON-STATION: <b className={onStationMet ? 'text-emerald-400' : 'text-red-400'}>
+                {specs.on_station_min_achieved.toFixed(0)}/{specs.on_station_min_required.toFixed(0)}min {onStationMet ? '✓' : '✗'}
+              </b></span>
               <span>ENGINE: <b className="text-[#E8EDF2]">{specs.engine_kw.toFixed(1)}kW</b></span>
               <span>BATT: <b className="text-[#FFB454]">{specs.battery_kwh.toFixed(1)}kWh</b></span>
-              <span>MOTORS: <b className="text-[#E8EDF2]">{specs.motor_count}× {specs.motor_model}</b></span>
+              <span>MOTOR: <b className="text-[#E8EDF2]">{specs.motor_count}× {specs.motor_model}</b></span>
               {/* SYS ONLINE badge */}
               <span className="flex items-center gap-1.5 ml-2 border border-[#1F2733] rounded-full px-2 py-0.5 bg-[#0A0E14]">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 " />
@@ -386,98 +382,93 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── PANEL A: Controls (Left Sidebar) ──────────────────────────── */}
-        <aside className="w-[320px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
+        <aside className="w-[284px] flex-shrink-0 border-r border-[#1F2733] bg-[#0A0E14]/40 backdrop-blur-xl flex flex-col overflow-y-auto custom-scrollbar">
 
-          {/* ── Mission Profile (input) ─── */}
+          {/* ── Simulation Constraints ─── */}
           <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '0ms' }}>
             <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
-              <span>🗺️</span> Mission Profile
+              <span>⚡</span> Simulation Constraints
             </h2>
 
-            <div className="space-y-2 mb-2">
-              {legs.map((leg, idx) => (
-                <div key={leg.id} className="bg-[#12161F] border border-[#1F2733] rounded-md p-2">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <select
-                      value={leg.role}
-                      disabled={loading}
-                      onChange={(e) => updateLeg(leg.id, { role: e.target.value as LegRole })}
-                      className="bg-white/5 border border-white/10 rounded text-[10px] px-1.5 py-0.5 text-[#E8EDF2] disabled:opacity-40"
-                    >
-                      <option value="cruise">Cruise</option>
-                      <option value="loiter">Loiter</option>
-                    </select>
-                    <span className="text-[8px] text-[#5C6773]">Leg {idx + 1}</span>
-                    <button
-                      onClick={() => removeLeg(leg.id)}
-                      disabled={loading || legs.length <= 1}
-                      className="text-[9px] text-red-400 hover:text-red-300 disabled:opacity-30 px-1"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 text-[9px]">
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[#5C6773]">Altitude (m)</span>
-                      <input
-                        type="number" value={leg.altitude_m} step={100} disabled={loading}
-                        onChange={(e) => updateLeg(leg.id, { altitude_m: parseFloat(e.target.value) || 0 })}
-                        className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#FFB454] font-mono disabled:opacity-40"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[#5C6773]">Speed (km/h)</span>
-                      <input
-                        type="number" value={leg.speed_kmh} step={10} disabled={loading}
-                        onChange={(e) => updateLeg(leg.id, { speed_kmh: parseFloat(e.target.value) || 0 })}
-                        className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#FFB454] font-mono disabled:opacity-40"
-                      />
-                    </label>
-                    {leg.role === 'cruise' ? (
-                      <>
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[#5C6773]">Distance (km)</span>
-                          <input
-                            type="number" value={leg.distance_km} step={50} disabled={loading}
-                            onChange={(e) => updateLeg(leg.id, { distance_km: parseFloat(e.target.value) || 0 })}
-                            className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-[#E8EDF2] font-mono disabled:opacity-40"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[#5C6773]">Wind (km/h)</span>
-                          <div className="flex gap-1">
-                            <select
-                              value={leg.windDir} disabled={loading}
-                              onChange={(e) => updateLeg(leg.id, { windDir: e.target.value as WindDir })}
-                              className="flex-1 bg-white/5 border border-white/10 rounded px-1 text-[8px] disabled:opacity-40"
-                            >
-                              <option value="headwind">Head</option>
-                              <option value="tailwind">Tail</option>
-                            </select>
-                            <input
-                              type="number" value={leg.windMagnitudeKmh} step={5} min={0} disabled={loading}
-                              onChange={(e) => updateLeg(leg.id, { windMagnitudeKmh: parseFloat(e.target.value) || 0 })}
-                              className="w-12 bg-white/5 border border-white/10 rounded px-1 font-mono disabled:opacity-40"
-                            />
-                          </div>
-                        </label>
-                      </>
-                    ) : (
-                      <label className="flex flex-col gap-0.5 col-span-2">
-                        <span className="text-[#5C6773]">Duration (min)</span>
-                        <input
-                          type="number" value={leg.duration_min} step={10} disabled={loading}
-                          onChange={(e) => updateLeg(leg.id, { duration_min: parseFloat(e.target.value) || 0 })}
-                          className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-violet-300 font-mono disabled:opacity-40"
-                        />
-                      </label>
-                    )}
-                  </div>
+            {legs.map((leg, idx) => (
+              <div key={leg.id} className={idx > 0 ? 'mt-3 pt-3 border-t border-[#1F2733]' : ''}>
+                <div className="flex items-center justify-between mb-2">
+                  <select
+                    value={leg.role}
+                    disabled={loading}
+                    onChange={(e) => updateLeg(leg.id, { role: e.target.value as LegRole })}
+                    className="bg-transparent text-[10px] font-bold uppercase tracking-wide text-[#5C6773] disabled:opacity-40 -ml-0.5"
+                  >
+                    <option value="cruise">Cruise Leg {idx + 1}</option>
+                    <option value="loiter">Loiter Leg {idx + 1}</option>
+                  </select>
+                  <button
+                    onClick={() => removeLeg(leg.id)}
+                    disabled={loading || legs.length <= 1}
+                    className="text-[9px] text-red-400 hover:text-red-300 disabled:opacity-30 px-1"
+                  >
+                    ✕ Remove
+                  </button>
                 </div>
-              ))}
-            </div>
 
-            <div className="flex gap-1.5 mb-2">
+                <div className="mb-3">
+                  <div className="flex justify-between text-[10px] mb-1">
+                    <span className="text-[#5C6773]">Altitude</span>
+                    <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.altitude_m}m</span>
+                  </div>
+                  <input type="range" min={baseElevationM + 300} max="10000" step="100" value={leg.altitude_m}
+                    onChange={(e) => updateLeg(leg.id, { altitude_m: parseInt(e.target.value) })} disabled={loading}
+                    className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
+                </div>
+
+                <div className="mb-3">
+                  <div className="flex justify-between text-[10px] mb-1">
+                    <span className="text-[#5C6773]">Speed</span>
+                    <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.speed_kmh} km/h</span>
+                  </div>
+                  <input type="range" min="100" max="350" step="5" value={leg.speed_kmh}
+                    onChange={(e) => updateLeg(leg.id, { speed_kmh: parseInt(e.target.value) })} disabled={loading}
+                    className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-[#FFB454] disabled:opacity-40" />
+                </div>
+
+                {leg.role === 'cruise' ? (
+                  <>
+                    <div className="mb-3">
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="text-[#5C6773]">Distance</span>
+                        <span className="font-mono text-cyan-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.distance_km} km</span>
+                      </div>
+                      <input type="range" min="50" max="1000" step="25" value={leg.distance_km}
+                        onChange={(e) => updateLeg(leg.id, { distance_km: parseInt(e.target.value) })} disabled={loading}
+                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-cyan-400 disabled:opacity-40" />
+                    </div>
+                    <div className="mb-1">
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="text-[#5C6773]">Wind</span>
+                        <span className="font-mono text-orange-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">
+                          {leg.windKmh === 0 ? 'Calm' : `${Math.abs(leg.windKmh)} km/h ${leg.windKmh > 0 ? 'Headwind' : 'Tailwind'}`}
+                        </span>
+                      </div>
+                      <input type="range" min="-60" max="60" step="5" value={leg.windKmh}
+                        onChange={(e) => updateLeg(leg.id, { windKmh: parseInt(e.target.value) })} disabled={loading}
+                        className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-orange-400 disabled:opacity-40" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="mb-1">
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className="text-[#5C6773]">Duration</span>
+                      <span className="font-mono text-violet-300 font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{leg.duration_min} min</span>
+                    </div>
+                    <input type="range" min="10" max="300" step="10" value={leg.duration_min}
+                      onChange={(e) => updateLeg(leg.id, { duration_min: parseInt(e.target.value) })} disabled={loading}
+                      className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-violet-400 disabled:opacity-40" />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <div className="flex gap-1.5 mt-3 mb-3">
               <button
                 onClick={() => addLeg('cruise')} disabled={loading}
                 className="flex-1 text-[9px] py-1 rounded border border-[#1F2733] text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-40"
@@ -493,21 +484,14 @@ export default function Dashboard() {
             </div>
 
             {legWarnings.length > 0 && (
-              <div className="mb-2 bg-amber-950/30 border border-amber-800/40 rounded-md p-2">
+              <div className="mb-3 bg-amber-950/30 border border-amber-800/40 rounded-md p-2">
                 {legWarnings.map((w, i) => (
                   <p key={i} className="text-[9px] text-amber-300 leading-snug mb-1 last:mb-0">⚠ {w}</p>
                 ))}
               </div>
             )}
-          </div>
 
-          {/* ── Environment & Constraints ─── */}
-          <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '25ms' }}>
-            <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
-              <span>⚡</span> Environment & Constraints
-            </h2>
-
-            <div className="mb-3">
+            <div className="mb-3 pt-3 border-t border-[#1F2733]">
               <div className="flex justify-between text-[10px] mb-1">
                 <span className="text-[#5C6773]">Base Elevation</span>
                 <span className="font-mono text-[#FFB454] font-bold bg-white/10 px-1.5 rounded backdrop-blur-md shadow-inner">{baseElevationM}m</span>
@@ -557,7 +541,7 @@ export default function Dashboard() {
                 className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-orange-500 disabled:opacity-40" />
             </div>
 
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-2">
               <input type="checkbox" id="silentLoiterToggle" checked={silentLoiterMode}
                 onChange={(e) => setSilentLoiterMode(e.target.checked)} disabled={loading}
                 className="w-3.5 h-3.5 rounded accent-[#FFB454] cursor-pointer disabled:opacity-40" />
@@ -566,13 +550,13 @@ export default function Dashboard() {
 
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-[9px] text-[#5C6773] hover:text-[#E8EDF2] mt-2 underline"
+              className="text-[9px] text-[#5C6773] hover:text-[#E8EDF2] mb-3 underline"
             >
-              {showAdvanced ? '− Hide' : '+ Show'} advanced design variables
+              {showAdvanced ? '− Hide' : '+ Show'} advanced variables
             </button>
 
             {showAdvanced && (
-              <div className="mt-2 space-y-2 border-t border-[#1F2733] pt-2">
+              <div className="mb-4 space-y-2 pt-2 border-t border-[#1F2733]">
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-[#5C6773]">Battery Chemistry</span>
                   <select
@@ -594,7 +578,7 @@ export default function Dashboard() {
             )}
 
             {/* Execute button with shimmer */}
-            <div className="relative mt-4">
+            <div className="relative">
               <button
                 onClick={handleOptimize}
                 disabled={loading}
@@ -660,70 +644,20 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ── Mission Feasibility (result) ─── */}
-          {specs && !loading && (
-            <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '75ms' }}>
-              <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
-                <span>🎯</span> Mission Feasibility
-              </h2>
-              <div className={`text-center rounded-md p-2 mb-2 border ${onStationMet ? 'border-emerald-700/40 bg-emerald-950/20' : 'border-red-700/40 bg-red-950/20'}`}>
-                <p className="text-[8px] text-[#5C6773] uppercase tracking-wide">On-Station Requirement</p>
-                <p className={`text-base font-bold font-mono ${onStationMet ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {specs.on_station_min_achieved.toFixed(0)} / {specs.on_station_min_required.toFixed(0)} min
-                </p>
-                <p className={`text-[9px] font-bold ${onStationMet ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {specs.on_station_min_required === 0 ? 'N/A — no loiter leg' : onStationMet ? '✓ REQUIREMENT MET' : '✗ CUT SHORT — see leg detail below'}
-                </p>
-              </div>
-
-              <div className="space-y-1 mb-2">
-                {specs.leg_results.map((r, i) => (
-                  <div key={i} className="flex items-center justify-between text-[9px]">
-                    <span className="capitalize text-[#5C6773]">{r.role} leg {i + 1}</span>
-                    <span className={r.completed ? 'text-emerald-400' : 'text-red-400'}>
-                      {r.achieved.toFixed(0)}/{r.required.toFixed(0)}{r.role === 'cruise' ? 'km' : 'min'} {r.completed ? '✓' : '✗'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5 text-[10px] mb-2">
-                <div className="bg-[#12161F] rounded-md p-1.5 border border-[#1F2733]">
-                  <span className="text-[#5C6773] text-[8px] block">RESERVE FUEL</span>
-                  <p className="font-mono font-bold">{specs.reserve_fuel_equivalent_min.toFixed(0)} min</p>
-                </div>
-                <div className="bg-[#12161F] rounded-md p-1.5 border border-[#1F2733]">
-                  <span className="text-[#5C6773] text-[8px] block">RESERVE BATT</span>
-                  <p className="font-mono font-bold">{specs.reserve_battery_equivalent_min.toFixed(0)} min</p>
-                </div>
-              </div>
-
-              <div className={`flex items-center gap-1.5 text-[9px] px-2 py-1 rounded border ${specs.engine_out_survivable ? 'border-emerald-700/40 text-emerald-400' : 'border-amber-700/40 text-amber-400'}`}>
-                <span>{specs.engine_out_survivable ? '✓' : '⚠'}</span>
-                <span>Engine-out survivable: {specs.engine_out_survivable ? 'Yes' : 'No'} (30min threshold)</span>
-              </div>
-
-              {specs.bonus_reserve_loiter_min > 0 && (
-                <p className="text-[9px] text-[#5C6773] mt-2">
-                  + {specs.bonus_reserve_loiter_min.toFixed(0)} min bonus reserve loiter beyond the required mission (not counted toward the requirement above)
-                </p>
-              )}
-
-              {specs.power_split_policy && (
-                <p className="text-[9px] text-[#5C6773] mt-2">
-                  GA-searched power split — cruise: {(specs.power_split_policy.cruise * 100).toFixed(0)}% electric,
-                  loiter: {(specs.power_split_policy.loiter * 100).toFixed(0)}% electric
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* ── Mission Timeline (result) ─── */}
-          {phaseSegments && !loading && (
+          {/* ── Mission Profile ─── */}
+          {phaseSegments && specs && !loading && (
             <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-md shadow-[0_4px_24px_rgba(0,0,0,0.2)] m-3 p-5 panel-enter" style={{ animationDelay: '100ms' }}>
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
-                <span>⏱️</span> Mission Timeline
+                <span>🗺️</span> Mission Profile
               </h2>
+
+              <div className="flex items-center justify-between mb-3 text-[10px]">
+                <span className="text-[#5C6773]">On-Station Requirement</span>
+                <span className={`font-bold font-mono ${onStationMet ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {specs.on_station_min_achieved.toFixed(0)}/{specs.on_station_min_required.toFixed(0)}min {onStationMet ? '✓ MET' : '✗ CUT SHORT'}
+                </span>
+              </div>
+
               <div className="relative pl-4">
                 {/* Vertical timeline line */}
                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-px bg-gradient-to-b from-emerald-500/60 via-slate-700/40 to-transparent" />
@@ -754,6 +688,13 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
+              </div>
+
+              <div className="flex justify-between text-[9px] text-[#5C6773] mt-3 pt-2 border-t border-[#1F2733]">
+                <span>Reserve: {specs.reserve_fuel_equivalent_min.toFixed(0)}min fuel / {specs.reserve_battery_equivalent_min.toFixed(0)}min batt</span>
+                <span className={specs.engine_out_survivable ? 'text-emerald-400' : 'text-amber-400'}>
+                  {specs.engine_out_survivable ? '✓' : '⚠'} engine-out
+                </span>
               </div>
             </div>
           )}
@@ -798,8 +739,6 @@ export default function Dashboard() {
                 <div className="flex justify-between"><span className="text-[#5C6773]">C-Rate Limit</span><span className="font-mono text-yellow-400">3C/5C</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">Motor η</span><span className="font-mono text-slate-300">96%</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">Chemistry</span><span className="font-mono text-slate-300">{specs.battery_chemistry}</span></div>
-                <div className="flex justify-between"><span className="text-[#5C6773]">Generator</span><span className="font-mono text-slate-300">{specs.generator_architecture}</span></div>
-                <div className="flex justify-between"><span className="text-[#5C6773]">Empty Wt Fraction</span><span className="font-mono text-slate-300">{(specs.empty_weight_fraction * 100).toFixed(1)}%</span></div>
                 <div className="flex justify-between"><span className="text-[#5C6773]">Strategy</span><span className="font-mono text-[#FFB454]">Zhang et al.</span></div>
               </div>
             </div>
