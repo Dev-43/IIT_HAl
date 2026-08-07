@@ -393,15 +393,18 @@ export default function Dashboard() {
             {legs.map((leg, idx) => (
               <div key={leg.id} className={idx > 0 ? 'mt-3 pt-3 border-t border-[#1F2733]' : ''}>
                 <div className="flex items-center justify-between mb-2">
-                  <select
-                    value={leg.role}
-                    disabled={loading}
-                    onChange={(e) => updateLeg(leg.id, { role: e.target.value as LegRole })}
-                    className="bg-transparent text-[10px] font-bold uppercase tracking-wide text-[#5C6773] disabled:opacity-40 -ml-0.5"
-                  >
-                    <option value="cruise">Cruise Leg {idx + 1}</option>
-                    <option value="loiter">Loiter Leg {idx + 1}</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={leg.role}
+                      disabled={loading}
+                      onChange={(e) => updateLeg(leg.id, { role: e.target.value as LegRole })}
+                      className="appearance-none bg-[#0A0E14] border border-[#1F2733] rounded text-[10px] font-bold uppercase tracking-wide text-[#E8EDF2] pl-2 pr-5 py-1 cursor-pointer disabled:opacity-40 hover:border-[#FFB454]/40 focus:outline-none focus:border-[#FFB454]/60"
+                    >
+                      <option value="cruise" className="bg-[#0A0E14] text-[#E8EDF2]">Cruise Leg {idx + 1}</option>
+                      <option value="loiter" className="bg-[#0A0E14] text-[#E8EDF2]">Loiter Leg {idx + 1}</option>
+                    </select>
+                    <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[7px] text-[#FFB454]">▾</span>
+                  </div>
                   <button
                     onClick={() => removeLeg(leg.id)}
                     disabled={loading || legs.length <= 1}
@@ -559,14 +562,17 @@ export default function Dashboard() {
               <div className="mb-4 space-y-2 pt-2 border-t border-[#1F2733]">
                 <label className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-[#5C6773]">Battery Chemistry</span>
-                  <select
-                    value={batteryChemistry} disabled={loading}
-                    onChange={(e) => setBatteryChemistry(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded text-[10px] px-1.5 py-1 text-[#E8EDF2] disabled:opacity-40"
-                  >
-                    <option value="Li-NCA">Li-NCA (250 Wh/kg, 3C/5C)</option>
-                    <option value="Li-LFP">Li-LFP (160 Wh/kg, 2.5C/4C, cold-tolerant)</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={batteryChemistry} disabled={loading}
+                      onChange={(e) => setBatteryChemistry(e.target.value)}
+                      className="appearance-none w-full bg-[#0A0E14] border border-[#1F2733] rounded text-[10px] pl-2 pr-6 py-1.5 text-[#E8EDF2] cursor-pointer disabled:opacity-40 hover:border-[#FFB454]/40 focus:outline-none focus:border-[#FFB454]/60"
+                    >
+                      <option value="Li-NCA" className="bg-[#0A0E14] text-[#E8EDF2]">Li-NCA (250 Wh/kg, 3C/5C)</option>
+                      <option value="Li-LFP" className="bg-[#0A0E14] text-[#E8EDF2]">Li-LFP (160 Wh/kg, 2.5C/4C, cold-tolerant)</option>
+                    </select>
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[8px] text-[#FFB454]">▾</span>
+                  </div>
                 </label>
                 <div className="flex items-center gap-2">
                   <input type="checkbox" id="optPsrToggle" checked={optimizePowerSplit}
