@@ -1,17 +1,26 @@
 """
 optimizer.py — DEAP Genetic Algorithm for Hybrid-Electric UAV Component Sizing.
 
-Outer Loop: Optimizes two design variables:
-  1. engine_size_kw  — Turboshaft shaft power rating (scales weight from reference spec)
+Outer Loop: Optimizes three core design variables:
+  1. engine_size_kw       — Turboshaft shaft power rating (scales weight from reference spec)
   2. battery_capacity_kwh — Battery pack energy (scales weight from energy density)
+  3. motor_count          — Number of EMRAX-228-class propulsion motors (1, 2, or 4)
 
-The electric motor is a FIXED off-the-shelf component (EMRAX 228, 12.3 kg).
+Battery chemistry (a discrete, judge-selectable preset — see battery_specs.json's
+chemistry_presets) and generator architecture (a fixed, documented 800V DC bus choice)
+are NOT GA-searched — they're categorical engineering choices, not continuous dials.
+Power-sharing strategy between thermal and electric systems can optionally also be
+GA-searched (optimize_power_split=True), which adds two more genes (cruise/loiter PSR)
+on top of the base three; takeoff/climb/descent/landing keep the heuristic's tuned values
+even in that mode.
 
 For each candidate individual the GA:
-  1. Computes total weight (airframe + payload + engine + motor + battery + fuel)
+  1. Computes total weight (airframe + payload + engine + motor(s) + battery + fuel)
   2. Checks MTOW ≤ 1000 kg constraint (fuel = remaining budget)
-  3. Runs a full flight simulation through UAVHybridEnv with heuristic power management
-  4. Returns endurance (hours) as the fitness value to MAXIMIZE
+  3. Runs a full flight simulation through UAVHybridEnv against the judge-authored
+     mission-leg profile
+  4. Returns endurance (hours) as the fitness value to MAXIMIZE, penalized if the mission
+     didn't land safely OR if any loiter leg's on-station requirement wasn't fully met
 """
 
 import os
@@ -27,6 +36,14 @@ if not hasattr(creator, "FitnessMax"):
 if not hasattr(creator, "Individual"):
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
+MOTOR_COUNT_OPTIONS = [1, 2, 4]
+INCOMPLETE_MISSION_PENALTY = 0.4  # reused for "didn't land" AND "loiter leg incomplete"
+
+
+def _round_motor_count(raw: float) -> int:
+    """Round a continuous GA gene to the nearest valid motor-count option."""
+    return min(MOTOR_COUNT_OPTIONS, key=lambda opt: abs(opt - raw))
+
 
 def load_bounds(data_dir: str) -> dict:
     """Load component sizing bounds dynamically from /data JSON files."""
@@ -38,55 +55,61 @@ def load_bounds(data_dir: str) -> dict:
     return {
         "engine": (engine_specs.get("min_size_kw", 30.0), engine_specs.get("max_size_kw", 120.0)),
         "battery": (battery_specs.get("min_capacity_kwh", 5.0), battery_specs.get("max_capacity_kwh", 50.0)),
+        "motor_count": (1.0, 4.0),
     }
+
 
 def evaluate_individual(
     individual,
-    target_speed_kmh: float,
-    target_altitude: float,
+    mission_legs: list,
+    base_elevation_m: float,
     payload_weight: float,
     data_dir: str,
     bounds: dict,
-    enable_loiter: bool = True,
     initial_fuel_fraction: float = 1.0,
-    optimize_psr: bool = False,
+    ambient_temp_c: float = 15.0,
+    turbulence_level: float = 0.0,
+    silent_loiter_mode: bool = True,
+    battery_chemistry: str = "Li-NCA",
+    optimize_power_split: bool = False,
 ):
     """
-    Evaluate a single GA individual by running a full flight simulation.
-    Returns (endurance_hours,) as a single-objective fitness tuple.
+    Evaluate a single GA individual by running a full flight simulation against the
+    judge-authored mission profile. Returns (endurance_hours,) as a single-objective
+    fitness tuple.
     """
-    if optimize_psr:
-        engine_kw, battery_kwh = individual[0], individual[1]
-        phase_psrs = {
-            "takeoff": individual[2],
-            "climb": individual[3],
-            "cruise": individual[4],
-            "loiter": individual[5],
-        }
+    if optimize_power_split:
+        engine_kw, battery_kwh, motor_count_raw, psr_cruise, psr_loiter = individual[:5]
+        phase_psrs = {"cruise": psr_cruise, "loiter": psr_loiter}
         use_heuristic_policy = False
     else:
-        engine_kw, battery_kwh = individual[0], individual[1]
+        engine_kw, battery_kwh, motor_count_raw = individual[:3]
         phase_psrs = None
         use_heuristic_policy = True
 
     # Clip to physical bounds
     engine_kw = max(bounds["engine"][0], min(engine_kw, bounds["engine"][1]))
     battery_kwh = max(bounds["battery"][0], min(battery_kwh, bounds["battery"][1]))
+    motor_count = _round_motor_count(motor_count_raw)
 
     # Instantiate the Gymnasium environment
     try:
         env = UAVHybridEnv(
             engine_size_kw=engine_kw,
             battery_capacity_kwh=battery_kwh,
-            target_speed_kmh=target_speed_kmh,
-            target_altitude=target_altitude,
+            motor_count=motor_count,
+            mission_legs=mission_legs,
+            base_elevation_m=base_elevation_m,
             payload_weight=payload_weight,
             data_dir=data_dir,
             use_heuristic_policy=use_heuristic_policy,
             phase_psrs=phase_psrs,
             dt=60.0,
-            enable_loiter=enable_loiter,
             initial_fuel_fraction=initial_fuel_fraction,
+            ambient_temp_c=ambient_temp_c,
+            turbulence_level=turbulence_level,
+            silent_loiter_mode=silent_loiter_mode,
+            battery_chemistry=battery_chemistry,
         )
     except Exception:
         return (0.0,)
@@ -99,32 +122,42 @@ def evaluate_individual(
     obs, info = env.reset()
     terminated, truncated = False, False
     while not (terminated or truncated):
-        obs, reward, terminated, truncated, info = env.step([0.5])  # action ignored by heuristic
+        obs, reward, terminated, truncated, info = env.step([0.5])  # action ignored by heuristic/phase_psrs
 
     # Fitness = total flight time in hours
     endurance_hours = env.time_elapsed / 3600.0
 
-    # Penalize non-successful missions (didn't complete full profile to landing)
+    # Penalize: didn't land safely, OR landed but a loiter leg's on-station requirement
+    # wasn't fully met. Same 0.4x constant governs both failure modes, applied once even
+    # if both hold — not stacked/squared.
     reason = info.get("reason", "")
-    if "Landed" not in reason and "Mission completed" not in reason:
-        endurance_hours *= 0.4  # 60% penalty for incomplete mission
+    landed = "Landed" in reason or "Mission completed" in reason
+    loiter_incomplete = any(r["role"] == "loiter" and not r["completed"] for r in env.leg_results)
+    if not landed or loiter_incomplete:
+        endurance_hours *= INCOMPLETE_MISSION_PENALTY
 
     return (endurance_hours,)
 
+
 def optimize_propulsion(
-    target_speed_kmh: float = 250.0,
-    target_altitude: float = 5000.0,
+    mission_legs: list,
+    base_elevation_m: float = 0.0,
     payload_weight: float = 200.0,
     data_dir: str = None,
     pop_size: int = 40,
     n_gen: int = 15,
-    enable_loiter: bool = True,
     initial_fuel_fraction: float = 1.0,
-    optimize_psr: bool = False,
+    ambient_temp_c: float = 15.0,
+    turbulence_level: float = 0.0,
+    silent_loiter_mode: bool = True,
+    battery_chemistry: str = "Li-NCA",
+    optimize_power_split: bool = False,
 ):
     """
-    Run the DEAP Genetic Algorithm to find the optimal propulsion sizing.
-    Returns a dict with the best engine_size_kw, battery_capacity_kwh, and fitness.
+    Run the DEAP Genetic Algorithm to find the optimal propulsion sizing against a
+    judge-authored mission profile. Returns a dict with the best engine_size_kw,
+    battery_capacity_kwh, motor_count, fitness, and per-generation convergence stats
+    (plus phase_psrs if optimize_power_split=True).
     """
     if data_dir is None:
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -137,11 +170,12 @@ def optimize_propulsion(
     # Attribute generators
     toolbox.register("attr_engine", random.uniform, bounds["engine"][0], bounds["engine"][1])
     toolbox.register("attr_battery", random.uniform, bounds["battery"][0], bounds["battery"][1])
-    toolbox.register("attr_psr", random.uniform, -1.0, 1.0)
+    toolbox.register("attr_motor_count", random.uniform, bounds["motor_count"][0], bounds["motor_count"][1])
+    toolbox.register("attr_psr", random.uniform, 0.0, 1.0)
 
     # Individual setup
-    if optimize_psr:
-        # Individual = [engine_kw, battery_kwh, psr_takeoff, psr_climb, psr_cruise, psr_loiter]
+    if optimize_power_split:
+        # Individual = [engine_kw, battery_kwh, motor_count, psr_cruise, psr_loiter]
         toolbox.register(
             "individual",
             tools.initCycle,
@@ -149,69 +183,77 @@ def optimize_propulsion(
             (
                 toolbox.attr_engine,
                 toolbox.attr_battery,
-                toolbox.attr_psr,
-                toolbox.attr_psr,
+                toolbox.attr_motor_count,
                 toolbox.attr_psr,
                 toolbox.attr_psr,
             ),
             n=1,
         )
     else:
-        # Individual = [engine_kw, battery_kwh]
+        # Individual = [engine_kw, battery_kwh, motor_count]
         toolbox.register(
             "individual",
             tools.initCycle,
             creator.Individual,
-            (toolbox.attr_engine, toolbox.attr_battery),
+            (toolbox.attr_engine, toolbox.attr_battery, toolbox.attr_motor_count),
             n=1,
         )
-        
+
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
     # Evaluation function
     toolbox.register(
         "evaluate",
         evaluate_individual,
-        target_speed_kmh=target_speed_kmh,
-        target_altitude=target_altitude,
+        mission_legs=mission_legs,
+        base_elevation_m=base_elevation_m,
         payload_weight=payload_weight,
         data_dir=data_dir,
         bounds=bounds,
-        enable_loiter=enable_loiter,
         initial_fuel_fraction=initial_fuel_fraction,
-        optimize_psr=optimize_psr,
+        ambient_temp_c=ambient_temp_c,
+        turbulence_level=turbulence_level,
+        silent_loiter_mode=silent_loiter_mode,
+        battery_chemistry=battery_chemistry,
+        optimize_power_split=optimize_power_split,
     )
 
     # Genetic operators
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
-    if optimize_psr:
-        toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=[8.0, 4.0, 0.15, 0.15, 0.15, 0.15], indpb=0.35)
+    if optimize_power_split:
+        # sigma: [engine, battery, motor_count, psr_cruise, psr_loiter] — small motor_count
+        # sigma so mutation explores neighboring counts rather than jumping randomly.
+        toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=[8.0, 4.0, 0.5, 0.15, 0.15], indpb=0.35)
     else:
-        toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=[8.0, 4.0], indpb=0.35)
-        
+        toolbox.register("mutate", tools.mutGaussian, mu=0.0, sigma=[8.0, 4.0, 0.5], indpb=0.35)
+
     toolbox.register("select", tools.selTournament, tournsize=3)
 
     # ---- Bound-clipping helper ---- #
     def clip_individual(ind):
         ind[0] = max(bounds["engine"][0], min(ind[0], bounds["engine"][1]))
         ind[1] = max(bounds["battery"][0], min(ind[1], bounds["battery"][1]))
-        if optimize_psr:
-            for i in range(2, 6):
-                ind[i] = max(-1.0, min(ind[i], 1.0))
+        ind[2] = max(bounds["motor_count"][0], min(ind[2], bounds["motor_count"][1]))
+        if optimize_power_split:
+            for i in range(3, 5):
+                ind[i] = max(0.0, min(ind[i], 1.0))
 
     # ---- Initialize Population ---- #
     print(f"\n========================================================")
     print(f"[START] INITIATING PROPULSION OPTIMIZATION LOOP")
     print(f"========================================================")
-    print(f"  Target Cruise Speed   : {target_speed_kmh} km/h")
-    print(f"  Target Cruise Altitude: {target_altitude} m")
-    print(f"  Payload Weight        : {payload_weight} kg")
-    print(f"  Loiter Phase Enabled  : {enable_loiter}")
-    print(f"  Initial Fuel Fraction : {initial_fuel_fraction * 100:.1f}%")
-    print(f"  GA Configuration      : Pop Size = {pop_size}, Max Gen = {n_gen}")
-    print(f"  Optimize PSR Policies : {optimize_psr}")
-    print(f"  Engine Sizing Search  : {bounds['engine'][0]} kW to {bounds['engine'][1]} kW")
-    print(f"  Battery Sizing Search : {bounds['battery'][0]} kWh to {bounds['battery'][1]} kWh")
+    print(f"  Mission Legs           : {len(mission_legs)}")
+    print(f"  Base Elevation         : {base_elevation_m} m")
+    print(f"  Payload Weight         : {payload_weight} kg")
+    print(f"  Ambient Temp / Turb.   : {ambient_temp_c}°C / {turbulence_level}")
+    print(f"  Silent Loiter Mode     : {silent_loiter_mode}")
+    print(f"  Battery Chemistry      : {battery_chemistry}")
+    print(f"  Initial Fuel Fraction  : {initial_fuel_fraction * 100:.1f}%")
+    print(f"  GA Configuration       : Pop Size = {pop_size}, Max Gen = {n_gen}")
+    print(f"  Optimize Power Split   : {optimize_power_split}")
+    print(f"  Engine Sizing Search   : {bounds['engine'][0]} kW to {bounds['engine'][1]} kW")
+    print(f"  Battery Sizing Search  : {bounds['battery'][0]} kWh to {bounds['battery'][1]} kWh")
+    print(f"  Motor Count Options    : {MOTOR_COUNT_OPTIONS}")
     print(f"--------------------------------------------------------")
 
     pop = toolbox.population(n=pop_size)
@@ -228,6 +270,13 @@ def optimize_propulsion(
     hof.update(pop)
 
     print("[SUCCESS] Initial population evaluation complete. Starting evolution.\n")
+
+    # Per-generation convergence stats — cheap to capture (already computed each
+    # generation) and directly useful for demonstrating GA convergence quality.
+    fits0 = [ind.fitness.values[0] for ind in pop]
+    generation_stats = [{
+        "generation": 0, "max": max(fits0), "min": min(fits0), "avg": float(np.mean(fits0)),
+    }]
 
     # ---- Generational Loop ---- #
     for gen in range(1, n_gen + 1):
@@ -259,17 +308,22 @@ def optimize_propulsion(
         pop[:] = offspring
         hof.update(pop)
 
-        # Generational statistics calculation
+        # Generational statistics
         fits = [ind.fitness.values[0] for ind in pop]
+        generation_stats.append({
+            "generation": gen, "max": max(fits), "min": min(fits), "avg": float(np.mean(fits)),
+        })
         best_ind = hof[0]
         print(f"[GEN] Generation {gen:02d}/{n_gen:02d}:")
         print(f"   * Max Fitness (Endurance): {max(fits):.3f} hours")
         print(f"   * Min Fitness (Endurance): {min(fits):.3f} hours")
         print(f"   * Avg Fitness (Endurance): {np.mean(fits):.3f} hours")
-        if optimize_psr:
-            print(f"   * Current Best Candidate: Engine = {best_ind[0]:.2f} kW, Battery = {best_ind[1]:.2f} kWh, PSR = [{best_ind[2]:.2f}, {best_ind[3]:.2f}, {best_ind[4]:.2f}, {best_ind[5]:.2f}]")
+        print(f"   * Current Best Candidate: Engine={best_ind[0]:.2f}kW, Battery={best_ind[1]:.2f}kWh, "
+              f"Motors={_round_motor_count(best_ind[2])}", end="")
+        if optimize_power_split:
+            print(f", PSR=[cruise={best_ind[3]:.2f}, loiter={best_ind[4]:.2f}]")
         else:
-            print(f"   * Current Best Candidate: Engine = {best_ind[0]:.2f} kW, Battery = {best_ind[1]:.2f} kWh")
+            print()
         print(f"--------------------------------------------------------")
 
     # ---- Return Best ---- #
@@ -278,32 +332,26 @@ def optimize_propulsion(
     print(f"[BEST] Sized Architecture:")
     print(f"   * Turboshaft Engine Size: {best[0]:.2f} kW")
     print(f"   * Battery Capacity      : {best[1]:.2f} kWh")
-    if optimize_psr:
-        print(f"   * Optimized PSR Policy  : Takeoff={best[2]:.2f}, Climb={best[3]:.2f}, Cruise={best[4]:.2f}, Loiter={best[5]:.2f}")
+    print(f"   * Motor Count           : {_round_motor_count(best[2])}")
     print(f"   * Expected Endurance    : {best.fitness.values[0]:.3f} hours")
     print(f"========================================================\n")
-    
+
     ret = {
         "engine_size_kw": float(best[0]),
         "battery_capacity_kwh": float(best[1]),
+        "motor_count": _round_motor_count(best[2]),
         "fitness": float(best.fitness.values[0]),
+        "generation_stats": generation_stats,
     }
-    if optimize_psr:
-        ret["phase_psrs"] = {
-            "takeoff": float(best[2]),
-            "climb": float(best[3]),
-            "cruise": float(best[4]),
-            "loiter": float(best[5]),
-        }
+    if optimize_power_split:
+        ret["phase_psrs"] = {"cruise": float(best[3]), "loiter": float(best[4])}
     return ret
-
-
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Run GA optimization for UAV sizing.")
-    parser.add_argument("--optimize-psr", action="store_true", help="Optimize PSR policies (6-gene).")
+    parser.add_argument("--optimize-power-split", action="store_true", help="Also GA-search cruise/loiter PSR.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
     parser.add_argument("--pop-size", type=int, default=40, help="GA population size.")
     parser.add_argument("--generations", type=int, default=15, help="GA generation count.")
@@ -313,18 +361,24 @@ if __name__ == "__main__":
         random.seed(args.seed)
         np.random.seed(args.seed)
 
-    print(f"Running GA optimizer (optimize-psr: {args.optimize_psr}, seed: {args.seed})...")
+    SAMPLE_MISSION = [
+        {"role": "cruise", "altitude_m": 5000, "speed_kmh": 250, "distance_km": 300, "headwind_kmh": 0.0},
+        {"role": "loiter", "altitude_m": 3000, "speed_kmh": 180, "duration_min": 60},
+        {"role": "cruise", "altitude_m": 5000, "speed_kmh": 250, "distance_km": 300, "headwind_kmh": 0.0},
+    ]
+
+    print(f"Running GA optimizer (optimize-power-split: {args.optimize_power_split}, seed: {args.seed})...")
     result = optimize_propulsion(
-        target_speed_kmh=250.0,
-        target_altitude=5000.0,
+        mission_legs=SAMPLE_MISSION,
         payload_weight=200.0,
         pop_size=args.pop_size,
         n_gen=args.generations,
-        optimize_psr=args.optimize_psr,
+        optimize_power_split=args.optimize_power_split,
     )
     print("Optimization complete!")
-    print(f"  Engine:    {result['engine_size_kw']:.2f} kW")
-    print(f"  Battery:   {result['battery_capacity_kwh']:.2f} kWh")
+    print(f"  Engine:      {result['engine_size_kw']:.2f} kW")
+    print(f"  Battery:     {result['battery_capacity_kwh']:.2f} kWh")
+    print(f"  Motor Count: {result['motor_count']}")
     if "phase_psrs" in result:
         print("  PSR Policy:")
         for phase, psr in result["phase_psrs"].items():
