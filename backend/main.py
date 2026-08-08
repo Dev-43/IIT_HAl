@@ -188,6 +188,7 @@ class TelemetryPoint(BaseModel):
     p_climb: float = 0.0
     climb_rate: float = 0.0
     disturbance_active: bool = False
+    leg_index: int = 0
 
 
 class OptimizationResponse(BaseModel):

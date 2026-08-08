@@ -15,11 +15,13 @@ interface TelemetryPoint {
   phase: string;
   u: number;
   climb_rate: number;
+  leg_index: number;
 }
 
 interface FlightSceneProps {
   telemetry: TelemetryPoint[];
   currentIndex: number;
+  missionLegCount?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -27,8 +29,16 @@ interface FlightSceneProps {
 /*  X = cumulative horizontal distance (scaled)                        */
 /*  Y = altitude (scaled)                                              */
 /*  Z = lateral offset (racetrack during loiter)                       */
+/*                                                                       */
+/*  missionLegCount = number of legs the user actually authored. Once   */
+/*  leg_index reaches this value, the aircraft has moved into the       */
+/*  synthetic bonus/reserve loiter (runs until resource-critical forces */
+/*  RTB) rather than a real named leg — telemetry alone can't tell the  */
+/*  two apart (both report phase="loiter"), so this count is required   */
+/*  to correctly separate "the loiter to orbit around" from "the        */
+/*  open-ended holding pattern that's actually part of the return".     */
 /* ------------------------------------------------------------------ */
-function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
+function generateFlightPath(telemetry: TelemetryPoint[], missionLegCount: number): THREE.Vector3[] {
   if (telemetry.length === 0) return [];
 
   const points: THREE.Vector3[] = [];
@@ -40,28 +50,24 @@ function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
   const ALT_SCALE = 0.003;
   const DIST_SCALE = 0.001;
 
-  // Pre-scan: find loiter window
+  // Pre-scan: find the PRIMARY (real, named) loiter window — leg_index < missionLegCount
+  // excludes the synthetic bonus/reserve loiter that kicks in once all named legs are
+  // done (leg_index frozen at exactly missionLegCount from then on, including through
+  // descent/landing). Without this exclusion, a mission with an explicit return cruise
+  // leg followed by that reserve loiter would merge both "loiter" runs into one window,
+  // making the return-cruise-leg in between fall through to the old straight-line
+  // rendering, and making the reserve loiter incorrectly re-center on the original
+  // outbound loiter position instead of continuing the return journey.
   let loiterStartIdx = -1;
   let loiterEndIdx = -1;
   for (let i = 0; i < telemetry.length; i++) {
-    if (telemetry[i].phase === 'loiter') {
+    if (telemetry[i].phase === 'loiter' && telemetry[i].leg_index < missionLegCount) {
       if (loiterStartIdx < 0) loiterStartIdx = i;
       loiterEndIdx = i;
+    } else if (loiterStartIdx >= 0) {
+      break; // primary loiter window is contiguous; stop at its first interruption
     }
   }
-
-  // Pre-scan: find descent + landing window for return-path lerp
-  let descentStartIdx = -1;
-  let landingEndIdx = -1;
-  for (let i = 0; i < telemetry.length; i++) {
-    if ((telemetry[i].phase === 'descent' || telemetry[i].phase === 'landing')) {
-      if (descentStartIdx < 0) descentStartIdx = i;
-      landingEndIdx = i;
-    }
-  }
-  const returnDuration = descentStartIdx >= 0 && landingEndIdx >= 0
-    ? Math.max(1, telemetry[landingEndIdx].time - telemetry[descentStartIdx].time)
-    : 1;
 
   // Compute loiter center X by accumulating distance to loiter start
   let loiterCenterX = 0;
@@ -87,13 +93,47 @@ function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
   const ORBIT_RADIUS_X = 10;
   const FORWARD_DRIFT = 8; // total forward distance across all orbits
 
-  // Return lane parallel to outbound path — same Z offset as orbit radius
-  const RETURN_LANE_Z = ORBIT_RADIUS_Z; // = 6 scene units
+  // ---- Determine where the "return to base" journey begins ---- //
+  // Preferred: right after the primary (real) loiter phase ends — covers both an
+  // explicit return cruise leg AND heading straight into the reserve loiter/RTB.
+  // Fallback (no real loiter leg at all, e.g. an all-cruise mission): the transition
+  // into whichever REAL leg is the last one flown (leg_index capped below
+  // missionLegCount, so the reserve loiter never counts as "the last real leg") —
+  // treats that final named leg as "the return," matching every documented mission
+  // shape in this project.
+  // Last-resort fallback (a single-leg mission, no leg transition ever happens):
+  // only ease back during descent+landing, since the physics itself never models a
+  // horizontal RTB distance in that case either.
+  let returnStartIdx = -1;
+  if (loiterStartIdx >= 0) {
+    returnStartIdx = loiterEndIdx + 1;
+  } else {
+    let maxRealLegIndexSeen = -1;
+    for (let i = 0; i < telemetry.length; i++) {
+      if (telemetry[i].leg_index < missionLegCount && telemetry[i].leg_index > maxRealLegIndexSeen) {
+        maxRealLegIndexSeen = telemetry[i].leg_index;
+      }
+    }
+    if (maxRealLegIndexSeen >= 1) {
+      for (let i = 0; i < telemetry.length; i++) {
+        if (telemetry[i].leg_index === maxRealLegIndexSeen) { returnStartIdx = i; break; }
+      }
+    } else {
+      for (let i = 0; i < telemetry.length; i++) {
+        if (telemetry[i].phase === 'descent') { returnStartIdx = i; break; }
+      }
+    }
+  }
 
-  // Descent/landing return path state (captured from last loiter point)
-  let returnStartX = 0;
-  let returnStartZ = 0;
-  let returnStartTime = 0;
+  // Return-journey state, captured continuously from wherever the outbound/
+  // loiter path actually left off — no snap, no time-based lerp, just real
+  // accumulated distance flown (using each point's own speed) counting back
+  // down toward the origin. This keeps the return cruise leg AND the
+  // subsequent descent/landing as one single smooth, physically-grounded
+  // motion instead of two disconnected animation systems.
+  let returnApexX = 0;
+  let returnApexZ = 0;
+  let returnDistFlown = 0;
 
   for (let i = 0; i < telemetry.length; i++) {
     const pt = telemetry[i];
@@ -103,8 +143,10 @@ function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
 
     const y = pt.altitude * ALT_SCALE;
 
-    if (pt.phase === 'loiter' && loiterStartIdx >= 0) {
-      // Forward-drifting racetrack: exactly NUM_ORBITS orbits
+    if (loiterStartIdx >= 0 && i >= loiterStartIdx && i <= loiterEndIdx) {
+      // Forward-drifting racetrack: exactly NUM_ORBITS orbits (primary loiter only —
+      // bounded by index, not just phase, so a later reserve/extend loiter with the
+      // same phase string doesn't re-enter this branch)
       const loiterElapsed = pt.time - loiterStartTime;
       const t = loiterElapsed / loiterDuration; // 0..1 over loiter phase
       const theta = 2 * Math.PI * NUM_ORBITS * t;
@@ -113,37 +155,28 @@ function generateFlightPath(telemetry: TelemetryPoint[]): THREE.Vector3[] {
       const z = Math.sin(theta) * ORBIT_RADIUS_Z;
       points.push(new THREE.Vector3(x, y, z));
 
-    } else if ((pt.phase === 'descent' || pt.phase === 'landing') && loiterStartIdx >= 0) {
-      // Return to origin along a parallel lane at Z = +RETURN_LANE_Z
-      if (pt.phase === 'descent' && (i === 0 || telemetry[i - 1].phase !== 'descent')) {
-        // Capture exit state from the last loiter point
+    } else if (returnStartIdx >= 0 && i >= returnStartIdx) {
+      if (i === returnStartIdx) {
+        // Continuity: start exactly where the previous segment left off.
         const lastPt = points[points.length - 1];
-        returnStartX = lastPt ? lastPt.x : 0;
-        returnStartZ = lastPt ? lastPt.z : 0;
-        returnStartTime = pt.time;
+        returnApexX = lastPt ? lastPt.x : 0;
+        returnApexZ = lastPt ? lastPt.z : 0;
+        returnDistFlown = 0;
       }
+      returnDistFlown += horizSpeed * dt;
 
-      // Progress 0→1 over the entire descent+landing duration
-      const returnElapsed = pt.time - returnStartTime;
-      const tReturn = Math.min(1, returnElapsed / returnDuration);
-
-      // Cosine ease-in-out for smooth deceleration at both ends
-      const ease = (1 - Math.cos(tReturn * Math.PI)) / 2;
-
-      // X: lerp from loiter exit X back to 0 (origin)
-      const x = returnStartX * (1 - ease);
-
-      // Z: first snap to return lane (RETURN_LANE_Z), then hold it back to origin
-      // Phase 1 (0→0.15): sweep Z from loiter exit Z to RETURN_LANE_Z
-      // Phase 2 (0.15→1): hold Z = RETURN_LANE_Z while heading home
-      const zEase = Math.min(1, tReturn / 0.15);
-      const zSweep = (1 - Math.cos(zEase * Math.PI)) / 2;
-      const z = returnStartZ + (RETURN_LANE_Z - returnStartZ) * zSweep;
+      const x = Math.max(0, returnApexX - returnDistFlown * DIST_SCALE);
+      // Ease the lateral offset back to the centerline in step with real
+      // return-distance progress (not wall-clock time), so it can never
+      // finish straightening out before the aircraft has actually arrived.
+      const progress = returnApexX > 0 ? Math.min(1, (returnApexX - x) / returnApexX) : 1;
+      const zEase = (1 - Math.cos(progress * Math.PI)) / 2;
+      const z = returnApexZ * (1 - zEase);
 
       points.push(new THREE.Vector3(x, y, z));
 
     } else {
-      // Straight line: takeoff, climb, cruise
+      // Straight line: takeoff, climb, outbound cruise
       const x = cumDist * DIST_SCALE;
       points.push(new THREE.Vector3(x, y, 0));
     }
@@ -443,8 +476,8 @@ function TacticalBackground({ currentX }: { currentX: number }) {
 /* ------------------------------------------------------------------ */
 /*  Main 3D Scene (inner Canvas content)                               */
 /* ------------------------------------------------------------------ */
-function SceneContent({ telemetry, currentIndex }: FlightSceneProps) {
-  const flightPath = useMemo(() => generateFlightPath(telemetry), [telemetry]);
+function SceneContent({ telemetry, currentIndex, missionLegCount = 0 }: FlightSceneProps) {
+  const flightPath = useMemo(() => generateFlightPath(telemetry, missionLegCount), [telemetry, missionLegCount]);
   const pathColors = useMemo(() => generatePathColors(telemetry), [telemetry]);
 
   const currentPos = useMemo(() => {
@@ -557,7 +590,7 @@ function SceneContent({ telemetry, currentIndex }: FlightSceneProps) {
 /* ------------------------------------------------------------------ */
 /*  Exported Component                                                 */
 /* ------------------------------------------------------------------ */
-export default function FlightScene({ telemetry, currentIndex }: FlightSceneProps) {
+export default function FlightScene({ telemetry, currentIndex, missionLegCount = 0 }: FlightSceneProps) {
   if (!telemetry || telemetry.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-[#0A0E14] text-slate-500 text-xs font-mono">
@@ -586,7 +619,7 @@ export default function FlightScene({ telemetry, currentIndex }: FlightSceneProp
         style={{ background: 'transparent', position: 'absolute', inset: 0 }}
         dpr={[1, 1.5]}
       >
-        <SceneContent telemetry={telemetry} currentIndex={currentIndex} />
+        <SceneContent telemetry={telemetry} currentIndex={currentIndex} missionLegCount={missionLegCount} />
       </Canvas>
       
       {/* Signature Element: MIL-STD Altitude Tape */}

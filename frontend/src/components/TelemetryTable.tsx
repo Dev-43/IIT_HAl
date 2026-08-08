@@ -88,7 +88,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const GRID = 'grid-cols-[60px_58px_58px_58px_52px_58px_58px_52px_62px_70px]';
+  const GRID = 'grid-cols-[60px_58px_58px_58px_52px_58px_58px_64px_52px_62px_70px]';
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
@@ -101,6 +101,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
         <span className="text-center">PSR</span>
         <span className="text-right">Motor</span>
         <span className="text-right">Engine</span>
+        <span className="text-right text-[#FFB454]">⚡Total</span>
         <span className="text-right">SoC</span>
         <span className="text-right">Fuel</span>
         <span className="text-center">Phase</span>
@@ -112,6 +113,7 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
         <span className="text-right">kW</span>
         <span className="text-right">kW</span>
         <span className="text-center">%</span>
+        <span className="text-right">kW</span>
         <span className="text-right">kW</span>
         <span className="text-right">kW</span>
         <span className="text-right">%</span>
@@ -150,6 +152,11 @@ export default function TelemetryTable({ telemetry, currentIndex, onIndexChange 
               </span>
               <span className="text-right text-[#FFB454]">{pt.power_motor.toFixed(1)}</span>
               <span className="text-right text-[#E8EDF2]">{pt.power_engine.toFixed(1)}</span>
+
+              {/* Total hybrid power delivered — highlighted */}
+              <span className="text-right font-bold text-[#FFB454] bg-[#FFB454]/10 rounded-sm px-0.5 -mx-0.5">
+                {pt.power_delivered.toFixed(1)}
+              </span>
 
               {/* SoC with inline bar */}
               <span className="text-right relative">

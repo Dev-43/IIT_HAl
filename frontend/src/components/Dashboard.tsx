@@ -64,6 +64,7 @@ interface TelemetryPoint {
   climb_rate: number;
   sfc: number;
   disturbance_active: boolean;
+  leg_index: number;
 }
 
 type LegRole = 'cruise' | 'loiter';
@@ -216,6 +217,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [specs, setSpecs] = useState<OptimalSpecs | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryPoint[]>([]);
+  // Leg count that actually produced `telemetry` — captured at the same time, since
+  // `legs` (live builder state) can be edited before the next run without re-fetching,
+  // and the 3D scene's return-to-base logic needs the count that matches THIS telemetry.
+  const [telemetryLegCount, setTelemetryLegCount] = useState<number>(0);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'3d' | 'charts'>('3d');
@@ -372,6 +377,7 @@ export default function Dashboard() {
       const data = await response.json();
       setSpecs(data.optimal_specs);
       setTelemetry(data.telemetry);
+      setTelemetryLegCount(apiLegs.length);
     } catch (err: unknown) {
       console.error(err);
       const errMsg = err instanceof Error ? err.message : 'Backend connection failed.';
@@ -869,6 +875,15 @@ export default function Dashboard() {
                   </span>
                 )}
               </div>
+
+              {/* Total Hybrid Power — highlighted (motor + engine actually delivered) */}
+              <div className="mb-2.5 rounded-md p-2 border border-[#FFB454]/50 bg-gradient-to-r from-[#FFB454]/15 to-transparent shadow-[0_0_14px_rgba(255,180,84,0.2)]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#FFB454] text-[9px] font-bold uppercase tracking-wide">⚡ Total Power (Hybrid)</span>
+                  <span className="font-mono font-bold text-[13px] text-[#FFB454]">{currentPoint.power_delivered.toFixed(1)} kW</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-1.5 text-[10px]">
                 {[
                   { label: 'ALT', value: `${currentPoint.altitude.toFixed(0)}m`, cls: '' },
@@ -1060,7 +1075,7 @@ export default function Dashboard() {
               ) : activeTab === '3d' ? (
                 <>
                   <div className="flex-1 relative">
-                    <FlightScene telemetry={telemetry} currentIndex={currentIndex} />
+                    <FlightScene telemetry={telemetry} currentIndex={currentIndex} missionLegCount={telemetryLegCount} />
                     {/* Legend glassmorphism pill */}
                     <div
                       className="absolute bottom-3 left-3 flex gap-3 text-[9px] font-mono px-3 py-1.5 rounded-full border border-slate-700/50"
