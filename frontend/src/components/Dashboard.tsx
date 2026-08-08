@@ -194,6 +194,11 @@ function HalLogo() {
 export default function Dashboard() {
   const [legs, setLegs] = useState<MissionLeg[]>(DEFAULT_LEGS);
   const legIdCounter = useRef<number>(DEFAULT_LEGS.length);
+  // Guards against a stale/out-of-order optimize response overwriting fresher state --
+  // e.g. an old in-flight request from before a Fast-Refresh/re-run resolving after a
+  // newer one already applied its results. Only the response matching the LATEST
+  // request actually gets applied; any earlier one is silently discarded.
+  const requestSeq = useRef<number>(0);
 
   const [baseElevationM, setBaseElevationM] = useState<number>(0);
   const [ambientTempC, setAmbientTempC] = useState<number>(15);
@@ -322,6 +327,7 @@ export default function Dashboard() {
   }, [legs]);
 
   const handleOptimize = useCallback(async () => {
+    const mySeq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     setCurrentIndex(0);
@@ -375,16 +381,20 @@ export default function Dashboard() {
         throw new Error(detail || 'Optimization failed.');
       }
       const data = await response.json();
+      if (mySeq !== requestSeq.current) return; // a newer request has since started -- discard
       setSpecs(data.optimal_specs);
       setTelemetry(data.telemetry);
       setTelemetryLegCount(apiLegs.length);
     } catch (err: unknown) {
+      if (mySeq !== requestSeq.current) return;
       console.error(err);
       const errMsg = err instanceof Error ? err.message : 'Backend connection failed.';
       setError(errMsg);
     } finally {
-      setLoading(false);
-      setLoadProgress(100);
+      if (mySeq === requestSeq.current) {
+        setLoading(false);
+        setLoadProgress(100);
+      }
     }
   }, [legs, baseElevationM, payloadWeight, initialFuelFraction, ambientTempC, turbulenceLevel, silentLoiterMode, batteryChemistry, optimizePowerSplit, policyMode, disturbanceEnabled, disturbanceTriggerMin, disturbanceDurationMin, disturbanceTempC, disturbanceTurbulence, disturbanceWindDelta]);
 
