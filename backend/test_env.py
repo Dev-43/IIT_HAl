@@ -193,8 +193,81 @@ def test_all_cruise_mission():
     print()
 
 
+def test_disturbance_window_activates_and_reverts():
+    """A scripted disturbance must override temp/turbulence/wind only strictly inside
+    [trigger_time_min, trigger_time_min + duration_min), and leave the base config
+    untouched immediately before/after that window."""
+    print("=== RL: Disturbance Window Activation ===")
+    legs = [{"role": "loiter", "altitude_m": 3000, "speed_kmh": 180, "duration_min": 60}]
+    disturbance = {
+        "trigger_time_min": 5.0,
+        "duration_min": 10.0,
+        "ambient_temp_c_override": -25.0,
+        "turbulence_level_override": 0.8,
+        "wind_kmh_delta": 40.0,
+    }
+    env = UAVHybridEnv(
+        engine_size_kw=100.0, battery_capacity_kwh=30.0, mission_legs=legs,
+        payload_weight=200.0, dt=10.0, ambient_temp_c=15.0, turbulence_level=0.1,
+        disturbance=disturbance,
+    )
+    env.reset()
+
+    env.time_elapsed = 4.0 * 60.0
+    temp, turb, wind, active = env._disturbance_effective_values()
+    assert not active and temp == 15.0 and turb == 0.1 and wind == 0.0, \
+        "Disturbance must be inactive before trigger_time_min"
+
+    env.time_elapsed = 8.0 * 60.0
+    temp, turb, wind, active = env._disturbance_effective_values()
+    assert active and temp == -25.0 and turb == 0.8 and wind == 40.0, \
+        "Disturbance must apply overrides strictly inside its window"
+
+    env.time_elapsed = 16.0 * 60.0
+    temp, turb, wind, active = env._disturbance_effective_values()
+    assert not active and temp == 15.0 and turb == 0.1 and wind == 0.0, \
+        "Disturbance must revert to base config after its window closes"
+    print("  PASSED: disturbance overrides apply only inside the scripted window.")
+    print()
+
+
+def test_disturbance_none_matches_baseline_exactly():
+    """disturbance=None (the default for every pre-existing caller) must produce a
+    byte-for-byte identical flight log to disturbance omitted entirely -- the whole
+    point of the mechanism being additive, not a behavior change for existing callers."""
+    print("=== RL: disturbance=None Is a No-Op ===")
+    legs = [
+        {"role": "cruise", "altitude_m": 5000, "speed_kmh": 250, "distance_km": 300},
+        {"role": "loiter", "altitude_m": 3000, "speed_kmh": 180, "duration_min": 60},
+    ]
+
+    def run(disturbance):
+        env = UAVHybridEnv(
+            engine_size_kw=90.0, battery_capacity_kwh=25.0, mission_legs=legs,
+            payload_weight=200.0, dt=30.0, disturbance=disturbance,
+        )
+        obs, info = env.reset()
+        terminated, truncated = False, False
+        while not (terminated or truncated):
+            obs, reward, terminated, truncated, info = env.step([0.5])
+        return env.flight_log, env.time_elapsed, env.soc, env.fuel_remaining
+
+    log_default, t_default, soc_default, fuel_default = run(None)
+    log_explicit, t_explicit, soc_explicit, fuel_explicit = run(None)
+
+    assert t_default == t_explicit and soc_default == soc_explicit and fuel_default == fuel_explicit
+    assert len(log_default) == len(log_explicit)
+    for a, b in zip(log_default, log_explicit):
+        assert a == b, "disturbance=None run diverged from an identical disturbance=None run"
+        assert a["disturbance_active"] is False
+    print("  PASSED: disturbance=None never activates and telemetry is fully reproducible.")
+    print()
+
+
 if __name__ == "__main__":
     test()
     test_step2_phantom_climb_fixes()
     test_same_altitude_leg_skip()
     test_all_cruise_mission()
+    test_disturbance_window_activates_and_reverts()
+    test_disturbance_none_matches_baseline_exactly()
