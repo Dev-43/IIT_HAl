@@ -66,6 +66,7 @@ class UAVHybridEnv(gym.Env):
         base_elevation_m: float = 0.0,
         motor_count: int = 1,
         battery_chemistry: str = "Li-NCA",
+        disturbance: dict = None,
     ):
         super().__init__()
         self.phase_psrs = phase_psrs
@@ -87,6 +88,7 @@ class UAVHybridEnv(gym.Env):
         self.turbulence_level = max(0.0, turbulence_level)
         self.silent_loiter_mode = silent_loiter_mode
         self.base_elevation_m = base_elevation_m
+        self.disturbance = disturbance  # optional scripted mid-mission environmental shock
 
         # ---- Mission profile (Phase 2) ----
         if not mission_legs:
@@ -256,7 +258,7 @@ class UAVHybridEnv(gym.Env):
     # ------------------------------------------------------------------ #
     #  Atmosphere Model (ISA Standard Atmosphere, temperature-adjustable)  #
     # ------------------------------------------------------------------ #
-    def _atmosphere(self, altitude_m: float) -> float:
+    def _atmosphere(self, altitude_m: float, temp_sea_level_override: float = None) -> float:
         """
         Return air density (kg/m³) at given altitude using the ISA model, adjusted for a
         configurable sea-level temperature (density altitude).
@@ -265,9 +267,15 @@ class UAVHybridEnv(gym.Env):
         At the standard T0=15°C this is algebraically identical to the fixed-temperature
         formula it replaces (0.0065/288.15 = 2.25577e-5), so behavior is unchanged unless
         ambient_temp_c is actually set away from 15.
+
+        temp_sea_level_override lets a caller (the scripted-disturbance path in step())
+        substitute a transient sea-level temperature for this one calculation without
+        mutating self.ambient_temp_sea_level_c. Defaults to None, which uses the stored
+        config exactly as before -- existing callers are unaffected.
         """
         rho_0 = self.aero["air_density_sea_level_kg_m3"]
-        t_sl_k = 273.15 + self.ambient_temp_sea_level_c
+        t_sl_c = temp_sea_level_override if temp_sea_level_override is not None else self.ambient_temp_sea_level_c
+        t_sl_k = 273.15 + t_sl_c
         if altitude_m < 11000:
             t_alt_k = max(150.0, t_sl_k - 0.0065 * altitude_m)
             rho = rho_0 * ((t_alt_k / t_sl_k) ** 4.25588)
@@ -277,11 +285,13 @@ class UAVHybridEnv(gym.Env):
             rho = rho_11k * math.exp(-(altitude_m - 11000) / 6341.6)
         return max(0.05, rho)
 
-    def _isa_temperature(self, altitude_m: float) -> float:
-        """Ambient temperature (°C) at altitude via the standard lapse rate."""
+    def _isa_temperature(self, altitude_m: float, temp_sea_level_override: float = None) -> float:
+        """Ambient temperature (°C) at altitude via the standard lapse rate. See
+        _atmosphere() for the temp_sea_level_override contract."""
+        t_sl_c = temp_sea_level_override if temp_sea_level_override is not None else self.ambient_temp_sea_level_c
         if altitude_m < 11000.0:
-            return self.ambient_temp_sea_level_c - 0.0065 * altitude_m
-        return self.ambient_temp_sea_level_c - 0.0065 * 11000.0
+            return t_sl_c - 0.0065 * altitude_m
+        return t_sl_c - 0.0065 * 11000.0
 
     def _speed_of_sound(self, temp_c: float) -> float:
         """a = sqrt(gamma * R * T_kelvin) = sqrt(1.4 * 287.05 * (273.15 + temp_c))."""
@@ -343,15 +353,22 @@ class UAVHybridEnv(gym.Env):
     def _compute_power_required(self, weight: float, speed: float, altitude: float,
                                  climb_rate: float, phase: str,
                                  temp_c: float = None,
-                                 turbulence_factor: float = 1.0) -> tuple[float, float, float]:
+                                 turbulence_factor: float = 1.0,
+                                 rho: float = None) -> tuple[float, float, float]:
         """
         Compute total shaft power required using the governing equations.
         Returns: (p_req_kw, p_aero_kw, p_climb_kw)
+
+        rho/temp_c let a caller pass in an already-computed (possibly disturbance-shocked)
+        density/temperature for this step, instead of recomputing from stored config.
+        Defaults to None, which computes from self.ambient_temp_sea_level_c exactly as
+        before -- existing callers (e.g. _compute_reserve_metrics) are unaffected.
         """
         if speed < 1.0:
             return (0.0, 0.0, 0.0)
 
-        rho = self._atmosphere(altitude)
+        if rho is None:
+            rho = self._atmosphere(altitude)
         if temp_c is None:
             temp_c = self._isa_temperature(altitude)
         S = self.aero["wing_area_m2"]
@@ -475,17 +492,47 @@ class UAVHybridEnv(gym.Env):
         return max(0.65, min(1.0, penalty))
 
     # ------------------------------------------------------------------ #
+    #  Scripted Environmental Disturbance                                 #
+    # ------------------------------------------------------------------ #
+    def _disturbance_effective_values(self):
+        """
+        Returns (effective_ambient_temp_c, effective_turbulence_level,
+        effective_wind_delta_kmh, disturbance_active) for the CURRENT step, based on
+        whether self.time_elapsed falls inside the configured disturbance window.
+
+        Pure per-step computation -- never mutates self.ambient_temp_sea_level_c or
+        self.turbulence_level, so behavior is provably identical to before whenever
+        self.disturbance is None (the default for every existing caller/test).
+        """
+        if self.disturbance is None:
+            return self.ambient_temp_sea_level_c, self.turbulence_level, 0.0, False
+
+        trigger_s = self.disturbance.get("trigger_time_min", 0.0) * 60.0
+        duration_s = self.disturbance.get("duration_min", 0.0) * 60.0
+        active = trigger_s <= self.time_elapsed < (trigger_s + duration_s)
+        if not active:
+            return self.ambient_temp_sea_level_c, self.turbulence_level, 0.0, False
+
+        eff_temp_c = self.disturbance.get("ambient_temp_c_override", self.ambient_temp_sea_level_c)
+        eff_turbulence = self.disturbance.get("turbulence_level_override", self.turbulence_level)
+        eff_wind_delta_kmh = self.disturbance.get("wind_kmh_delta", 0.0)
+        return eff_temp_c, eff_turbulence, eff_wind_delta_kmh, True
+
+    # ------------------------------------------------------------------ #
     #  Engine Power Limit (Altitude-Derated via Gagg-Ferrar)              #
     # ------------------------------------------------------------------ #
-    def _max_engine_power(self, altitude_m: float, is_peak: bool = False) -> float:
+    def _max_engine_power(self, altitude_m: float, is_peak: bool = False,
+                           temp_sea_level_override: float = None) -> float:
         """
         Compute altitude-derated maximum available engine power in kW using the Gagg-Ferrar formula.
         Ref: sigma = rho(h) / rho_0
              P_max_ice(h) = P_max_ice_SL * clip(sigma - (1 - sigma) / 7.55, 0.15, 1.0)
         Floor of 0.15 (rather than 0) — engine power never fully dies from pure altitude
         derating alone; only binds at extreme altitude/derate combinations.
+
+        temp_sea_level_override: see _atmosphere().
         """
-        rho = self._atmosphere(altitude_m)
+        rho = self._atmosphere(altitude_m, temp_sea_level_override=temp_sea_level_override)
         rho_0 = self.aero["air_density_sea_level_kg_m3"]
         sigma = rho / rho_0
         base_power = self.engine_peak_kw if is_peak else self.engine_continuous_kw
@@ -530,6 +577,7 @@ class UAVHybridEnv(gym.Env):
             "p_aero": round(p_aero, 3),
             "p_climb": round(p_climb, 3),
             "climb_rate": round(climb_rate, 3),
+            "disturbance_active": self.disturbance_active,
         })
 
     # ------------------------------------------------------------------ #
@@ -571,6 +619,7 @@ class UAVHybridEnv(gym.Env):
         self.reserve_battery_equivalent_min = None
         self.engine_out_survivable = None
         self._min_soc_seen = self.soc
+        self.disturbance_active = False
 
         # Initial telemetry log
         self._log_telemetry(0.5, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -727,17 +776,22 @@ class UAVHybridEnv(gym.Env):
         if self.current_phase == self.PHASE_CLIMB and psr > 0.05:
             psr = 0.05
 
+        # ---- Scripted environmental disturbance (zero effect when self.disturbance is None) ----
+        eff_temp_sl_c, eff_turbulence_level, eff_wind_delta_kmh, self.disturbance_active = (
+            self._disturbance_effective_values()
+        )
+
         # ---- Turbulence noise on aerodynamic power (zero effect at turbulence_level=0) ----
-        if self.turbulence_level > 0:
-            noise = np.random.normal(0.0, 0.05 * self.turbulence_level)
+        if eff_turbulence_level > 0:
+            noise = np.random.normal(0.0, 0.05 * eff_turbulence_level)
             turbulence_factor = float(np.clip(1.0 + noise, 0.8, 1.2))
         else:
             turbulence_factor = 1.0
 
         # ---- Phase-Dependent Flight State ----
         current_weight = self.weight_empty_and_payload + self.fuel_remaining
-        rho = self._atmosphere(self.altitude)
-        temp_c = self._isa_temperature(self.altitude)
+        rho = self._atmosphere(self.altitude, temp_sea_level_override=eff_temp_sl_c)
+        temp_c = self._isa_temperature(self.altitude, temp_sea_level_override=eff_temp_sl_c)
         temp_penalty = self._battery_temperature_penalty(temp_c)
         effective_batt_cap = self.battery_capacity_kwh * temp_penalty
         v_stall = self._stall_speed(current_weight, rho)
@@ -793,12 +847,12 @@ class UAVHybridEnv(gym.Env):
             # (Note: we pass 0.0 for climb_rate)
             _, p_aero_kw, _ = self._compute_power_required(
                 current_weight, self.speed, self.altitude, 0.0, self.current_phase,
-                temp_c=temp_c, turbulence_factor=turbulence_factor,
+                temp_c=temp_c, turbulence_factor=turbulence_factor, rho=rho,
             )
 
             # Available shaft power (battery side derated by cold-soak temp_penalty)
             p_elec_avail = 0.0 if self.soc <= self.soc_min else self._max_battery_power(is_peak=is_peak_phase, temp_penalty=temp_penalty)
-            p_engine_avail = 0.0 if self.fuel_remaining <= 0.01 else self._max_engine_power(self.altitude, is_peak=is_peak_phase)
+            p_engine_avail = 0.0 if self.fuel_remaining <= 0.01 else self._max_engine_power(self.altitude, is_peak=is_peak_phase, temp_sea_level_override=eff_temp_sl_c)
             p_avail_shaft = p_elec_avail + p_engine_avail
 
             # Available thrust power
@@ -823,7 +877,7 @@ class UAVHybridEnv(gym.Env):
         # ---- Compute Power Required ----
         p_req_kw, p_aero_kw, p_climb_kw = self._compute_power_required(
             current_weight, self.speed, self.altitude, climb_rate, self.current_phase,
-            temp_c=temp_c, turbulence_factor=turbulence_factor,
+            temp_c=temp_c, turbulence_factor=turbulence_factor, rho=rho,
         )
 
         # ---- Apply Power Split with Physical Constraints ----
@@ -841,7 +895,7 @@ class UAVHybridEnv(gym.Env):
                 p_motor = min(p_motor_demand, max_motor)
 
             # Engine limit (rating + fuel availability)
-            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase)
+            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase, temp_sea_level_override=eff_temp_sl_c)
             if self.fuel_remaining <= 0.01:
                 p_engine = 0.0
             else:
@@ -875,7 +929,7 @@ class UAVHybridEnv(gym.Env):
             # psr < 0.0: Charging case (Motor acts as generator, engine drives both propeller and generator)
             p_motor_demand = psr * p_req_kw
             
-            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase)
+            engine_max = self._max_engine_power(self.altitude, is_peak=is_peak_phase, temp_sea_level_override=eff_temp_sl_c)
             max_charge = self._max_battery_power(is_peak=is_peak_phase, temp_penalty=temp_penalty)
             max_soc = self.battery_specs.get("max_soc_limit", 0.95)
             
@@ -1002,9 +1056,13 @@ class UAVHybridEnv(gym.Env):
 
         elif self.current_phase == self.PHASE_CRUISE:
             # On-station cruise leg — accumulate ground distance (headwind extends the time,
-            # and therefore the energy burned, needed to cover a fixed distance).
+            # and therefore the energy burned, needed to cover a fixed distance). A scripted
+            # wind-gust disturbance adds to the leg's own headwind for the window's duration
+            # (same sign convention: positive = additional headwind, floored so groundspeed
+            # never goes to zero/negative during an extreme gust).
             leg = self._current_leg()
-            groundspeed_kmh = (leg["speed_ms"] * 3.6) - (leg.get("headwind_ms", 0.0) * 3.6)
+            base_headwind_kmh = leg.get("headwind_ms", 0.0) * 3.6
+            groundspeed_kmh = max(10.0, (leg["speed_ms"] * 3.6) - base_headwind_kmh - eff_wind_delta_kmh)
             self.leg_distance_flown_km += groundspeed_kmh * dt_hours
             if self.leg_distance_flown_km >= leg["distance_km"]:
                 self._complete_leg_and_advance()

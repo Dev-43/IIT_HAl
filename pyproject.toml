@@ -16,5 +16,14 @@ dependencies = [
     "pytest>=7.0.0",
 ]
 
+# Optional: only needed for policy_mode="rl" (training or inference). The base app
+# (policy_mode="heuristic", the default) never imports these — see backend/rl_policy.py's
+# lazy import. Install with: uv sync --extra rl
+[project.optional-dependencies]
+rl = [
+    "torch>=2.0.0",
+    "stable-baselines3>=2.0.0",
+]
+
 [tool.uv]
 package = false

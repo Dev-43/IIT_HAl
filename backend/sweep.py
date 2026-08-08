@@ -19,11 +19,14 @@ def run_sensitivity_sweep(
     silent_loiter_mode: bool = True,
     battery_chemistry: str = "Li-NCA",
     data_dir: str = None,
+    disturbance: dict = None,
 ):
     """
     Run 4 sensitivity simulations for a given design at +/-10% SFC and +/-10% battery
     density, against the same mission profile used to size the design. Returns the range
-    of expected endurance.
+    of expected endurance. Always uses the heuristic policy (this is a sizing-robustness
+    check, not a policy comparison) but still honors `disturbance` so the sweep reflects
+    the same scripted shock, if any, that the headline resimulation used.
     """
     scenarios = [
         {"sfc_scale": 1.1, "battery_density_scale": 1.1, "name": "+10% SFC, +10% Battery Density"},
@@ -48,6 +51,7 @@ def run_sensitivity_sweep(
             silent_loiter_mode=silent_loiter_mode,
             battery_chemistry=battery_chemistry,
             data_dir=data_dir,
+            disturbance=disturbance,
             **overrides,
         )
 

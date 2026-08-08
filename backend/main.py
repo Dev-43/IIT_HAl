@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 from optimizer import optimize_propulsion
 from environment import UAVHybridEnv
+from rl_policy import extract_rl_features, load_policy, predict_psr, RLPolicyUnavailable
 
 app = FastAPI(
     title="AeroOptima — Hybrid-Electric UAV Propulsion Optimization API",
@@ -82,6 +83,24 @@ class MissionLeg(BaseModel):
         return self
 
 
+class Disturbance(BaseModel):
+    """A scripted mid-mission environmental shock: a temperature drop, turbulence spike,
+    and/or wind gust active for [trigger_time_min, trigger_time_min + duration_min).
+    Purely additive — omitting this field entirely leaves every simulation byte-for-byte
+    identical to pre-RL behavior."""
+    trigger_time_min: float = Field(..., ge=0.0, description="Minutes into the mission when the shock begins")
+    duration_min: float = Field(..., gt=0.0, le=180.0, description="How long the shock lasts, in minutes")
+    ambient_temp_c_override: Optional[float] = Field(
+        None, ge=-60.0, le=50.0, description="Sea-level temp during the shock; omit to leave temp unchanged"
+    )
+    turbulence_level_override: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Turbulence level during the shock; omit to leave turbulence unchanged"
+    )
+    wind_kmh_delta: float = Field(
+        0.0, description="Extra headwind (positive) or tailwind (negative) during the shock, added to cruise legs"
+    )
+
+
 class OptimizationRequest(BaseModel):
     legs: list[MissionLeg] = Field(..., min_length=1)
     base_elevation_m: float = Field(0.0, ge=0.0, le=6000.0, description="Home-base elevation, AMSL")
@@ -93,6 +112,12 @@ class OptimizationRequest(BaseModel):
     battery_chemistry: str = Field("Li-NCA", description="Preset key from battery_specs.json chemistry_presets")
     optimize_power_split: bool = Field(
         False, description="Also GA-search cruise/loiter power-split policy (slower, opt-in)"
+    )
+    policy_mode: Literal["heuristic", "rl"] = Field(
+        "heuristic", description="Power-split policy used for the post-GA resimulation/telemetry"
+    )
+    disturbance: Optional[Disturbance] = Field(
+        None, description="Optional scripted mid-mission environmental shock (wind/temp/turbulence)"
     )
 
     @model_validator(mode="after")
@@ -141,6 +166,7 @@ class OptimalSpecs(BaseModel):
     generator_efficiency: float
     l_over_d_max: float
     power_split_policy: Optional[dict] = None
+    policy_mode: str = "heuristic"
 
 
 class TelemetryPoint(BaseModel):
@@ -161,6 +187,7 @@ class TelemetryPoint(BaseModel):
     p_aero: float = 0.0
     p_climb: float = 0.0
     climb_rate: float = 0.0
+    disturbance_active: bool = False
 
 
 class OptimizationResponse(BaseModel):
@@ -180,11 +207,24 @@ async def optimize_uav(req: OptimizationRequest):
     print(f"   * silent loiter: {req.silent_loiter_mode}, chemistry: {req.battery_chemistry}")
     print(f"   * fuel frac    : {req.initial_fuel_fraction * 100:.1f}%")
     print(f"   * optimize power split: {req.optimize_power_split}")
+    print(f"   * policy mode  : {req.policy_mode}")
+    print(f"   * disturbance  : {req.disturbance.model_dump() if req.disturbance else None}")
 
     try:
         mission_legs = [leg.model_dump() for leg in req.legs]
+        disturbance = req.disturbance.model_dump(exclude_none=True) if req.disturbance else None
 
-        # 1. Run DEAP Genetic Algorithm (Outer Loop)
+        # RL resimulation needs a loaded policy before we spend time on GA sizing —
+        # fail fast with a clean 422 rather than doing all that work first.
+        rl_model = None
+        if req.policy_mode == "rl":
+            try:
+                rl_model = load_policy()
+            except RLPolicyUnavailable as e:
+                raise HTTPException(status_code=422, detail=str(e))
+
+        # 1. Run DEAP Genetic Algorithm (Outer Loop) — always sizes with the fast heuristic;
+        # policy_mode only changes how the chosen design is resimulated for telemetry below.
         ga_result = optimize_propulsion(
             mission_legs=mission_legs,
             base_elevation_m=req.base_elevation_m,
@@ -196,16 +236,21 @@ async def optimize_uav(req: OptimizationRequest):
             silent_loiter_mode=req.silent_loiter_mode,
             battery_chemistry=req.battery_chemistry,
             optimize_power_split=req.optimize_power_split,
+            disturbance=disturbance,
         )
 
         opt_engine = ga_result["engine_size_kw"]
         opt_battery = ga_result["battery_capacity_kwh"]
         opt_motor_count = ga_result["motor_count"]
-        phase_psrs = ga_result.get("phase_psrs")
+        # RL resim always drives PSR via the policy's own action -- a GA-searched
+        # phase_psrs (from optimize_power_split) is ignored for this run, since the two
+        # are alternative PSR strategies and RL's whole point is a *dynamic* per-step PSR.
+        phase_psrs = ga_result.get("phase_psrs") if req.policy_mode == "heuristic" else None
 
         # 2. Re-simulate best individual with fine time steps for clean telemetry
         print(f"[SIM] SIZING COMPLETE. Re-running dynamic simulation to gather 1-min interval telemetry...")
         print(f"   Using Engine={opt_engine:.2f}kW, Battery={opt_battery:.2f}kWh, Motors={opt_motor_count}")
+        print(f"   Policy mode: {req.policy_mode}")
 
         env = UAVHybridEnv(
             engine_size_kw=opt_engine,
@@ -215,7 +260,7 @@ async def optimize_uav(req: OptimizationRequest):
             base_elevation_m=req.base_elevation_m,
             payload_weight=req.payload_weight,
             data_dir=DATA_DIR,
-            use_heuristic_policy=(phase_psrs is None),
+            use_heuristic_policy=(req.policy_mode == "heuristic" and phase_psrs is None),
             phase_psrs=phase_psrs,
             dt=60.0,
             initial_fuel_fraction=req.initial_fuel_fraction,
@@ -223,13 +268,19 @@ async def optimize_uav(req: OptimizationRequest):
             turbulence_level=req.turbulence_level,
             silent_loiter_mode=req.silent_loiter_mode,
             battery_chemistry=req.battery_chemistry,
+            disturbance=disturbance,
         )
 
         obs, info = env.reset()
         terminated, truncated = False, False
         step_count = 0
         while not (terminated or truncated):
-            obs, reward, terminated, truncated, info = env.step([0.5])
+            if req.policy_mode == "rl":
+                features = extract_rl_features(env, obs)
+                action = [predict_psr(rl_model, features)]
+            else:
+                action = [0.5]  # ignored by the heuristic/phase_psrs policy branches
+            obs, reward, terminated, truncated, info = env.step(action)
             step_count += 1
 
         print(f"[SIM] Flight simulation complete:")
@@ -255,6 +306,7 @@ async def optimize_uav(req: OptimizationRequest):
             silent_loiter_mode=req.silent_loiter_mode,
             battery_chemistry=req.battery_chemistry,
             data_dir=DATA_DIR,
+            disturbance=disturbance,
         )
 
         # Analytic max lift-to-drag ratio: L/D_max = 0.5*sqrt(pi*AR*e/CD0)
@@ -296,6 +348,7 @@ async def optimize_uav(req: OptimizationRequest):
             generator_efficiency=BATTERY_SPECS.get("generator_efficiency", 0.85),
             l_over_d_max=round(l_over_d_max, 2),
             power_split_policy=phase_psrs,
+            policy_mode=req.policy_mode,
         )
 
         telemetry = []

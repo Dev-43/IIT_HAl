@@ -72,6 +72,7 @@ def evaluate_individual(
     silent_loiter_mode: bool = True,
     battery_chemistry: str = "Li-NCA",
     optimize_power_split: bool = False,
+    disturbance: dict = None,
 ):
     """
     Evaluate a single GA individual by running a full flight simulation against the
@@ -110,6 +111,7 @@ def evaluate_individual(
             turbulence_level=turbulence_level,
             silent_loiter_mode=silent_loiter_mode,
             battery_chemistry=battery_chemistry,
+            disturbance=disturbance,
         )
     except Exception:
         return (0.0,)
@@ -152,6 +154,7 @@ def optimize_propulsion(
     silent_loiter_mode: bool = True,
     battery_chemistry: str = "Li-NCA",
     optimize_power_split: bool = False,
+    disturbance: dict = None,
 ):
     """
     Run the DEAP Genetic Algorithm to find the optimal propulsion sizing against a
@@ -216,6 +219,7 @@ def optimize_propulsion(
         silent_loiter_mode=silent_loiter_mode,
         battery_chemistry=battery_chemistry,
         optimize_power_split=optimize_power_split,
+        disturbance=disturbance,
     )
 
     # Genetic operators
