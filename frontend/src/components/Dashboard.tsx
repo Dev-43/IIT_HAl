@@ -83,6 +83,63 @@ const DEFAULT_LEGS: MissionLeg[] = [
   { id: 'leg-2', role: 'loiter', altitude_m: 3000, speed_kmh: 180, distance_km: 300, duration_min: 60, windKmh: 0 },
 ];
 
+interface MissionPreset {
+  name: string;
+  description: string;
+  legs: Omit<MissionLeg, 'id'>[];
+  baseElevationM: number;
+  ambientTempC: number;
+  turbulenceLevel: number;
+  silentLoiterMode: boolean;
+  batteryChemistry: string;
+  policyMode: 'heuristic' | 'rl';
+  disturbance: null | {
+    triggerMin: number;
+    durationMin: number;
+    tempC: number;
+    turbulence: number;
+    windDelta: number;
+  };
+}
+
+// Pure convenience layer for fast/reliable live demos -- each preset just pre-fills the
+// exact same state the manual leg-by-leg builder already produces, via the existing
+// setters (see loadPreset()). Zero backend risk: nothing here bypasses validation.
+const MISSION_PRESETS: MissionPreset[] = [
+  {
+    name: 'Nyoma ISR Patrol',
+    description: 'High-altitude (4000m AMSL) cold-weather ISR patrol: ingress cruise, silent on-station loiter, egress cruise. No disturbance -- demonstrates mission-leg engine + base-elevation realism.',
+    legs: [
+      { role: 'cruise', altitude_m: 6500, speed_kmh: 250, distance_km: 80, duration_min: 30, windKmh: 0 },
+      { role: 'loiter', altitude_m: 5500, speed_kmh: 170, distance_km: 200, duration_min: 180, windKmh: 0 },
+      { role: 'cruise', altitude_m: 6500, speed_kmh: 250, distance_km: 80, duration_min: 30, windKmh: 0 },
+    ],
+    baseElevationM: 4000,
+    ambientTempC: -10,
+    turbulenceLevel: 0,
+    silentLoiterMode: true,
+    batteryChemistry: 'Li-LFP',
+    policyMode: 'heuristic',
+    disturbance: null,
+  },
+  {
+    name: 'Storm-Front Contingency',
+    description: 'Sea-level cruise-loiter-cruise mission with a scripted storm (temp drop + turbulence spike + wind gust) hitting mid-loiter. Flip Heuristic/RL and re-run to compare shock handling.',
+    legs: [
+      { role: 'cruise', altitude_m: 5000, speed_kmh: 250, distance_km: 300, duration_min: 30, windKmh: 0 },
+      { role: 'loiter', altitude_m: 3000, speed_kmh: 180, distance_km: 200, duration_min: 120, windKmh: 0 },
+      { role: 'cruise', altitude_m: 5000, speed_kmh: 250, distance_km: 300, duration_min: 30, windKmh: 0 },
+    ],
+    baseElevationM: 0,
+    ambientTempC: 15,
+    turbulenceLevel: 0,
+    silentLoiterMode: true,
+    batteryChemistry: 'Li-NCA',
+    policyMode: 'heuristic',
+    disturbance: { triggerMin: 100, durationMin: 15, tempC: -30, turbulence: 0.9, windDelta: 70 },
+  },
+];
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined'
     ? `http://${window.location.hostname}:8000`
@@ -220,6 +277,31 @@ export default function Dashboard() {
 
   const updateLeg = useCallback((id: string, patch: Partial<MissionLeg>) => {
     setLegs(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+
+  const loadPreset = useCallback((preset: MissionPreset) => {
+    setLegs(preset.legs.map((leg) => {
+      legIdCounter.current += 1;
+      return { ...leg, id: `leg-${legIdCounter.current}` };
+    }));
+    setBaseElevationM(preset.baseElevationM);
+    setAmbientTempC(preset.ambientTempC);
+    setTurbulenceLevel(preset.turbulenceLevel);
+    setSilentLoiterMode(preset.silentLoiterMode);
+    setBatteryChemistry(preset.batteryChemistry);
+    setOptimizePowerSplit(false);
+    setPolicyMode(preset.policyMode);
+    if (preset.disturbance) {
+      setDisturbanceEnabled(true);
+      setDisturbanceTriggerMin(preset.disturbance.triggerMin);
+      setDisturbanceDurationMin(preset.disturbance.durationMin);
+      setDisturbanceTempC(preset.disturbance.tempC);
+      setDisturbanceTurbulence(preset.disturbance.turbulence);
+      setDisturbanceWindDelta(preset.disturbance.windDelta);
+    } else {
+      setDisturbanceEnabled(false);
+    }
+    setShowAdvanced(true);
   }, []);
 
   const legWarnings = useMemo(() => {
@@ -430,6 +512,25 @@ export default function Dashboard() {
             <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5">
               <span>⚡</span> Simulation Constraints
             </h2>
+
+            <div className="mb-3 pb-3 border-b border-[#1F2733]">
+              <span className="text-[9px] text-[#5C6773] uppercase tracking-wide block mb-1.5">Quick Load — Demo Presets</span>
+              <div className="flex flex-col gap-1.5">
+                {MISSION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => loadPreset(preset)}
+                    disabled={loading}
+                    title={preset.description}
+                    className="text-left px-2 py-1.5 rounded border border-[#1F2733] bg-[#0A0E14] hover:border-[#FFB454]/40 hover:bg-[#12161F] disabled:opacity-40 transition-colors"
+                  >
+                    <span className="block font-bold text-[9px] text-[#E8EDF2]">{preset.name}</span>
+                    <span className="block text-[8px] text-[#5C6773] mt-0.5 leading-snug">{preset.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {legs.map((leg, idx) => (
               <div key={leg.id} className={idx > 0 ? 'mt-3 pt-3 border-t border-[#1F2733]' : ''}>
