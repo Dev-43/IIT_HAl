@@ -578,6 +578,7 @@ class UAVHybridEnv(gym.Env):
             "p_climb": round(p_climb, 3),
             "climb_rate": round(climb_rate, 3),
             "disturbance_active": self.disturbance_active,
+            "leg_index": self.leg_index,
         })
 
     # ------------------------------------------------------------------ #
