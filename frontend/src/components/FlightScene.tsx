@@ -135,6 +135,21 @@ function generateFlightPath(telemetry: TelemetryPoint[], missionLegCount: number
   let returnApexZ = 0;
   let returnDistFlown = 0;
 
+  // Once the return journey clamps to x=0 (arrived at base) but the aircraft is still
+  // burning down the reserve/bonus loiter before a resource-critical RTB finally forces
+  // final descent, that phase can run for HOURS of telemetry (the reserve loiter has no
+  // fixed duration) — without this, every one of those frames renders the exact same
+  // frozen point, which reads as "nothing happening" even though real telemetry (SoC,
+  // fuel, time) is still advancing underneath. A small holding-pattern orbit keeps the
+  // visualization alive for that entire stretch instead of parking on a dead pixel.
+  let arrivedHoldStartTime: number | null = null;
+  const HOLD_RADIUS = 4;
+  // Deliberately NOT a multiple of the telemetry step (60s): a round period would only
+  // ever sample the same handful of angles, looking like a tiny repeating square instead
+  // of motion. 190s precesses slowly instead, so a reserve loiter spanning many hours of
+  // telemetry keeps tracing new points rather than retracing the same 4.
+  const HOLD_PERIOD_S = 190;
+
   for (let i = 0; i < telemetry.length; i++) {
     const pt = telemetry[i];
     const dt = i > 0 ? pt.time - telemetry[i - 1].time : 0;
@@ -173,7 +188,16 @@ function generateFlightPath(telemetry: TelemetryPoint[], missionLegCount: number
       const zEase = (1 - Math.cos(progress * Math.PI)) / 2;
       const z = returnApexZ * (1 - zEase);
 
-      points.push(new THREE.Vector3(x, y, z));
+      if (x <= 0 && pt.phase === 'loiter') {
+        // Arrived at base, still holding in the reserve loiter -- orbit instead of
+        // sitting frozen on one point for however long that phase runs.
+        if (arrivedHoldStartTime === null) arrivedHoldStartTime = pt.time;
+        const holdTheta = ((pt.time - arrivedHoldStartTime) / HOLD_PERIOD_S) * 2 * Math.PI;
+        points.push(new THREE.Vector3(Math.cos(holdTheta) * HOLD_RADIUS, y, Math.sin(holdTheta) * HOLD_RADIUS));
+      } else {
+        arrivedHoldStartTime = null; // left the hold (final descent begun) -- reset for safety
+        points.push(new THREE.Vector3(x, y, z));
+      }
 
     } else {
       // Straight line: takeoff, climb, outbound cruise
