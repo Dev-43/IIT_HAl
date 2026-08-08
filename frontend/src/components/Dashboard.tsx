@@ -42,6 +42,7 @@ interface OptimalSpecs {
   generator_efficiency: number;
   l_over_d_max: number;
   power_split_policy?: { cruise: number; loiter: number } | null;
+  policy_mode: string;
 }
 
 interface TelemetryPoint {
@@ -62,6 +63,7 @@ interface TelemetryPoint {
   p_climb: number;
   climb_rate: number;
   sfc: number;
+  disturbance_active: boolean;
 }
 
 type LegRole = 'cruise' | 'loiter';
@@ -142,6 +144,13 @@ export default function Dashboard() {
   const [batteryChemistry, setBatteryChemistry] = useState<string>('Li-NCA');
   const [optimizePowerSplit, setOptimizePowerSplit] = useState<boolean>(false);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [policyMode, setPolicyMode] = useState<'heuristic' | 'rl'>('heuristic');
+  const [disturbanceEnabled, setDisturbanceEnabled] = useState<boolean>(false);
+  const [disturbanceTriggerMin, setDisturbanceTriggerMin] = useState<number>(2);
+  const [disturbanceDurationMin, setDisturbanceDurationMin] = useState<number>(12);
+  const [disturbanceTempC, setDisturbanceTempC] = useState<number>(-35);
+  const [disturbanceTurbulence, setDisturbanceTurbulence] = useState<number>(1.0);
+  const [disturbanceWindDelta, setDisturbanceWindDelta] = useState<number>(90);
 
   const [payloadWeight, setPayloadWeight] = useState<number>(200);
   const [showMatrix, setShowMatrix] = useState<boolean>(true);
@@ -261,6 +270,14 @@ export default function Dashboard() {
           silent_loiter_mode: silentLoiterMode,
           battery_chemistry: batteryChemistry,
           optimize_power_split: optimizePowerSplit,
+          policy_mode: policyMode,
+          disturbance: disturbanceEnabled ? {
+            trigger_time_min: disturbanceTriggerMin,
+            duration_min: disturbanceDurationMin,
+            ambient_temp_c_override: disturbanceTempC,
+            turbulence_level_override: disturbanceTurbulence,
+            wind_kmh_delta: disturbanceWindDelta,
+          } : undefined,
         }),
       });
       if (!response.ok) {
@@ -281,7 +298,7 @@ export default function Dashboard() {
       setLoading(false);
       setLoadProgress(100);
     }
-  }, [legs, baseElevationM, payloadWeight, initialFuelFraction, ambientTempC, turbulenceLevel, silentLoiterMode, batteryChemistry, optimizePowerSplit]);
+  }, [legs, baseElevationM, payloadWeight, initialFuelFraction, ambientTempC, turbulenceLevel, silentLoiterMode, batteryChemistry, optimizePowerSplit, policyMode, disturbanceEnabled, disturbanceTriggerMin, disturbanceDurationMin, disturbanceTempC, disturbanceTurbulence, disturbanceWindDelta]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -313,6 +330,23 @@ export default function Dashboard() {
     if (!phaseSegments) return 1;
     return phaseSegments.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
   }, [phaseSegments]);
+
+  // Contiguous disturbance_active windows, expressed as scrubber-index ranges, so the
+  // playback timeline can highlight exactly where the scripted shock was in effect.
+  const disturbanceBands = useMemo(() => {
+    if (!telemetry.length) return [];
+    const bands: { startIdx: number; endIdx: number }[] = [];
+    let bandStart: number | null = null;
+    telemetry.forEach((pt, i) => {
+      if (pt.disturbance_active && bandStart === null) bandStart = i;
+      if (!pt.disturbance_active && bandStart !== null) {
+        bands.push({ startIdx: bandStart, endIdx: i - 1 });
+        bandStart = null;
+      }
+    });
+    if (bandStart !== null) bands.push({ startIdx: bandStart, endIdx: telemetry.length - 1 });
+    return bands;
+  }, [telemetry]);
 
   const weightBreakdown = useMemo(() => {
     if (!specs) return null;
@@ -368,6 +402,13 @@ export default function Dashboard() {
               <span>ENGINE: <b className="text-[#E8EDF2]">{specs.engine_kw.toFixed(1)}kW</b></span>
               <span>BATT: <b className="text-[#FFB454]">{specs.battery_kwh.toFixed(1)}kWh</b></span>
               <span>MOTOR: <b className="text-[#E8EDF2]">{specs.motor_count}× {specs.motor_model}</b></span>
+              <span>POLICY: <b className="text-[#E8EDF2] uppercase">{specs.policy_mode}</b></span>
+              {currentPoint?.disturbance_active && (
+                <span className="flex items-center gap-1.5 border border-red-700/50 rounded-full px-2 py-0.5 bg-red-950/40 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                  <span className="text-[9px] font-bold text-red-300 tracking-widest">SHOCK ACTIVE</span>
+                </span>
+              )}
               {/* SYS ONLINE badge */}
               <span className="flex items-center gap-1.5 ml-2 border border-[#1F2733] rounded-full px-2 py-0.5 bg-[#0A0E14]">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 " />
@@ -580,6 +621,96 @@ export default function Dashboard() {
                     className="w-3.5 h-3.5 rounded accent-[#FFB454] cursor-pointer disabled:opacity-40" />
                   <label htmlFor="optPsrToggle" className="text-[10px] text-[#5C6773] cursor-pointer">GA-search power-split policy (slower)</label>
                 </div>
+
+                <div className="pt-2 border-t border-[#1F2733]">
+                  <span className="text-[10px] text-[#5C6773] block mb-1">Power-Split Policy (resim/telemetry)</span>
+                  <div className="flex rounded border border-[#1F2733] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setPolicyMode('heuristic')}
+                      disabled={loading}
+                      className={`flex-1 text-[9px] font-bold uppercase tracking-wide py-1.5 transition-colors disabled:opacity-40 ${
+                        policyMode === 'heuristic' ? 'bg-[#FFB454] text-[#0A0E14]' : 'bg-[#0A0E14] text-[#5C6773] hover:text-[#E8EDF2]'
+                      }`}
+                    >
+                      Heuristic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPolicyMode('rl')}
+                      disabled={loading}
+                      className={`flex-1 text-[9px] font-bold uppercase tracking-wide py-1.5 transition-colors border-l border-[#1F2733] disabled:opacity-40 ${
+                        policyMode === 'rl' ? 'bg-[#FFB454] text-[#0A0E14]' : 'bg-[#0A0E14] text-[#5C6773] hover:text-[#E8EDF2]'
+                      }`}
+                    >
+                      RL
+                    </button>
+                  </div>
+                  {policyMode === 'rl' && (
+                    <p className="text-[9px] text-[#5C6773] mt-1 leading-snug">
+                      RL drives cruise/loiter power-split directly each step, trained to react to sudden environmental shocks. GA sizing itself always uses the heuristic.
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-[#1F2733]">
+                  <div className="flex items-center gap-2 mb-2">
+                    <input type="checkbox" id="disturbanceToggle" checked={disturbanceEnabled}
+                      onChange={(e) => setDisturbanceEnabled(e.target.checked)} disabled={loading}
+                      className="w-3.5 h-3.5 rounded accent-red-500 cursor-pointer disabled:opacity-40" />
+                    <label htmlFor="disturbanceToggle" className="text-[10px] text-[#5C6773] cursor-pointer">Environmental Disturbance (scripted shock)</label>
+                  </div>
+
+                  {disturbanceEnabled && (
+                    <div className="space-y-2 pl-1">
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-[#5C6773]">Trigger Time</span>
+                          <span className="font-mono text-red-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{disturbanceTriggerMin}min</span>
+                        </div>
+                        <input type="range" min="0" max="120" step="1" value={disturbanceTriggerMin}
+                          onChange={(e) => setDisturbanceTriggerMin(parseInt(e.target.value))} disabled={loading}
+                          className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-red-500 disabled:opacity-40" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-[#5C6773]">Duration</span>
+                          <span className="font-mono text-red-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{disturbanceDurationMin}min</span>
+                        </div>
+                        <input type="range" min="1" max="60" step="1" value={disturbanceDurationMin}
+                          onChange={(e) => setDisturbanceDurationMin(parseInt(e.target.value))} disabled={loading}
+                          className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-red-500 disabled:opacity-40" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-[#5C6773]">Temp Drop To</span>
+                          <span className="font-mono text-red-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{disturbanceTempC}°C</span>
+                        </div>
+                        <input type="range" min="-50" max="20" step="1" value={disturbanceTempC}
+                          onChange={(e) => setDisturbanceTempC(parseInt(e.target.value))} disabled={loading}
+                          className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-red-500 disabled:opacity-40" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-[#5C6773]">Turbulence Spike</span>
+                          <span className="font-mono text-red-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">{disturbanceTurbulence.toFixed(1)}</span>
+                        </div>
+                        <input type="range" min="0" max="1" step="0.1" value={disturbanceTurbulence}
+                          onChange={(e) => setDisturbanceTurbulence(parseFloat(e.target.value))} disabled={loading}
+                          className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-red-500 disabled:opacity-40" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-[#5C6773]">Wind Gust</span>
+                          <span className="font-mono text-red-400 font-bold bg-[#0A0E14] px-1.5 rounded border border-[#1F2733]">+{disturbanceWindDelta}km/h</span>
+                        </div>
+                        <input type="range" min="0" max="120" step="5" value={disturbanceWindDelta}
+                          onChange={(e) => setDisturbanceWindDelta(parseInt(e.target.value))} disabled={loading}
+                          className="w-full h-1 bg-slate-800 rounded appearance-none cursor-pointer accent-red-500 disabled:opacity-40" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -627,8 +758,15 @@ export default function Dashboard() {
               <h2 className="text-[9px] font-bold text-[#5C6773] uppercase tracking-[0.15em] mb-2 flex items-center gap-1.5">
                 <span>📡</span> Current State — T+{fmtTime(currentPoint.time)}
               </h2>
-              <div className={`inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded border mb-3 ${PHASE_BADGE[currentPoint.phase] || PHASE_BADGE.completed} ${PHASE_GLOW[currentPoint.phase] || ''}`}>
-                {currentPoint.phase}
+              <div className="flex items-center gap-1.5 mb-3">
+                <span className={`inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${PHASE_BADGE[currentPoint.phase] || PHASE_BADGE.completed} ${PHASE_GLOW[currentPoint.phase] || ''}`}>
+                  {currentPoint.phase}
+                </span>
+                {currentPoint.disturbance_active && (
+                  <span className="inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded border bg-red-950/60 text-red-300 border-red-700/50 animate-pulse">
+                    ⚡ shock
+                  </span>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-1.5 text-[10px]">
                 {[
@@ -836,6 +974,9 @@ export default function Dashboard() {
                       <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-cyan-500" />HYBRID</span>
                       <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" />ENGINE</span>
                       <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-500" />IDLE</span>
+                      {disturbanceBands.length > 0 && (
+                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500" />SHOCK</span>
+                      )}
                     </div>
                   </div>
 
@@ -849,6 +990,17 @@ export default function Dashboard() {
                       {isPlaying ? '⏸' : '▶'}
                     </button>
                     <div className="flex-1 relative">
+                      {disturbanceBands.map((b, i) => (
+                        <div
+                          key={i}
+                          className="absolute top-1/2 -translate-y-1/2 h-2 bg-red-500/50 border border-red-400/70 rounded-sm pointer-events-none"
+                          style={{
+                            left: `${(b.startIdx / Math.max(1, telemetry.length - 1)) * 100}%`,
+                            width: `${Math.max(0.5, ((b.endIdx - b.startIdx) / Math.max(1, telemetry.length - 1)) * 100)}%`,
+                          }}
+                          title="Environmental disturbance active"
+                        />
+                      ))}
                       <input
                         type="range"
                         min="0"
@@ -856,7 +1008,7 @@ export default function Dashboard() {
                         step="1"
                         value={currentIndex}
                         onChange={(e) => { setCurrentIndex(parseInt(e.target.value)); setIsPlaying(false); }}
-                        className="w-full appearance-none cursor-pointer"
+                        className="w-full appearance-none cursor-pointer relative"
                         style={{
                           height: '4px',
                           background: telemetry.length > 0
